@@ -1,0 +1,97 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fleetmind}
+      POSTGRES_USER: ${POSTGRES_USER:-fleetmind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fleetmind}
+    ports:
+      - "5432:5432"
+    volumes:
+      - fleetmind-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fleetmind} -d ${POSTGRES_DB:-fleetmind}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redpanda:
+    image: redpandadata/redpanda:v24.3.1
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 768M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092,OUTSIDE://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092,OUTSIDE://localhost:19092
+    ports:
+      - "19092:19092"
+      - "9644:9644"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health --brokers=localhost:9092 | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fleetmind:fleetmind@postgres:5432/fleetmind}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fleetmind:fleetmind@postgres:5432/fleetmind}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      TELEMETRY_TOPIC: ${TELEMETRY_TOPIC:-vehicle.telemetry.v1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+
+  simulator:
+    build:
+      context: .
+      dockerfile: services/simulator/Dockerfile
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      TELEMETRY_TOPIC: ${TELEMETRY_TOPIC:-vehicle.telemetry.v1}
+      SIMULATED_VEHICLES: ${SIMULATED_VEHICLES:-500}
+      SIM_EVENTS_PER_SECOND: ${SIM_EVENTS_PER_SECOND:-120}
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  fleetmind-postgres:
