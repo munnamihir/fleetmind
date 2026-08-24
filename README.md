@@ -24,7 +24,7 @@ eventual fault
 
 FleetMind must infer the problem from telemetry.
 
-## Current milestone: Phase 2 reliability science
+## Current milestone: Phase 5.1 predictive-maintenance benchmark hardening
 
 ```text
 Synthetic fleet ─► Redpanda/Kafka ─► Risk worker ─► PostgreSQL ─► FastAPI ─► React console
@@ -48,6 +48,20 @@ Synthetic fleet ─► Redpanda/Kafka ─► Risk worker ─► PostgreSQL ─�
 - B10/B50 and characteristic-life estimates
 - Kaplan-Meier survival curves
 - Early-warning detection rate and lead-time/mileage metrics
+- Firmware treatment/control cohort comparison
+- Coarsened exact matching by component revision, mileage band and environment
+- Cochran–Mantel–Haenszel significance testing and effect-size estimates
+- Hardware × firmware interaction analysis
+- Firmware Regression Lab dashboard
+- Rolling telemetry feature windows with right-censoring protection
+- Sensor-only XGBoost predictive-maintenance baseline
+- Vehicle-isolated, late-life held-out evaluation
+- Validation-derived alert threshold targeting ~2% false-positive rate
+- Optional Platt probability calibration when validation support is sufficient
+- ROC-AUC, PR-AUC, precision/recall/F1, Brier score and confusion matrix
+- ML early-warning lead-distance evaluation
+- Persisted model runs, feature importance and live vehicle predictions
+- Predictive Maintenance ML dashboard
 
 ## Run
 
@@ -92,6 +106,13 @@ GET /api/v1/vehicles/{vehicle_id}
 GET /api/v1/cohorts/pump-revisions
 GET /api/v1/reliability/pump-revisions
 GET /api/v1/reliability/failures?limit=50
+GET /api/v1/firmware/overview
+GET /api/v1/firmware/regression?target=2026.32.4&control=2026.32.1
+GET /api/v1/ml/status
+GET /api/v1/ml/benchmark
+GET /api/v1/ml/predictions?limit=25
+GET /api/v1/ml/vehicles/{vehicle_id}
+GET /api/v1/ml/vehicles/{vehicle_id}/history?limit=60
 ```
 
 ## Repository
@@ -107,10 +128,14 @@ fleetmind/
 │   │   ├── config.py
 │   │   ├── db.py
 │   │   ├── models.py
+│   │   ├── reliability.py
+│   │   ├── firmware.py
+│   │   ├── ml_features.py
 │   │   └── risk.py
 │   ├── api/
 │   ├── worker/
-│   └── simulator/
+│   ├── simulator/
+│   └── ml/
 ├── web/
 │   └── src/
 └── tests/
@@ -136,6 +161,26 @@ The simulator publishes observable telemetry and private evaluation truth to sep
 For each pump revision, FleetMind treats failed vehicles as observed lifetimes and healthy vehicles as right-censored lifetimes. The API fits a two-parameter Weibull distribution, returns β/η/B10/B50, generates a Kaplan-Meier curve, and measures how far before failure the first degraded/critical telemetry signal appeared.
 
 `SIM_TIME_ACCELERATION=600` means one wall-clock second represents 600 seconds of accelerated fleet operation so useful field-life statistics emerge during a short local demo.
+
+## Firmware regression intelligence v0.3
+
+Phase 4 adds a synthetic OTA regression scenario affecting CP-17 coolant pumps on firmware `2026.32.4`. The failure cause remains private simulator truth; the analysis layer only sees ordinary firmware metadata, telemetry and observed failure events.
+
+FleetMind compares `2026.32.4` against `2026.32.1` using coarsened exact matching on component revision, 40k-mile odometer band and ambient-temperature band. It reports raw matched failure rates, risk ratio with a 95% interval, absolute risk increase, a Mantel-Haenszel common odds ratio, Cochran-Mantel-Haenszel significance, supportive telemetry deltas, and hardware × firmware interactions.
+
+The simulator intentionally uses a larger CP-17 cohort in this demo milestone so a 500-vehicle local run can accumulate enough failures to exercise the statistical workflow. Treat all results as synthetic experiment output, not real Tesla data.
+
+## Predictive maintenance ML v0.5
+
+Phase 5.1 predicts whether a coolant-pump failure will occur within the next `ML_FAILURE_HORIZON_MILES` (2,500 miles by default) from rolling telemetry windows while separating operational scoring from benchmark claims. The fitted models are intentionally denied FleetMind's rule-engine outputs: `risk_score`, `status`, alerts, fault codes, vehicle identity and failure-event fields are not model inputs. Firmware/revision/factory/model remain available as display context but are excluded from fit.
+
+Training examples are prospective. Features use telemetry at or before the window anchor; the label asks whether the private failure event occurs after the anchor and within the future mileage horizon. Healthy-looking windows without enough future observed mileage are treated as right-censored and dropped instead of being mislabeled as negatives.
+
+The benchmark cohort is frozen by a deterministic SHA-256 hash of `vehicle_id` using a fixed seed. Membership is label-agnostic, so a vehicle cannot enter or leave the benchmark when it later fails. Benchmark vehicles are never used for model fitting, Platt calibration or threshold selection. The operating threshold still comes only from validation negatives, targeting roughly a 2% validation false-positive rate.
+
+Every complete run evaluates both sensor-only XGBoost and a sensor-only logistic-regression baseline on the exact same frozen benchmark. FleetMind reports ROC-AUC, PR-AUC, precision, recall, F1, Brier score, confusion matrices, calibration, early-warning lead mileage and XGBoost-vs-baseline deltas. A benchmark qualification gate blocks headline claims until the frozen cohort has at least 1,000 eligible windows, 20 positive windows, 8 distinct failure vehicles and both classes. Operational live predictions continue even if the benchmark is not yet qualified.
+
+Historical `ml_predictions` rows are retained intentionally and exposed through the vehicle-history API so the dashboard can visualize longitudinal risk instead of treating older model-run predictions as duplicates. Serialized XGBoost and logistic-regression artifacts are stored in the ML Docker volume.
 
 See [ROADMAP.md](ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

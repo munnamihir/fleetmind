@@ -24,21 +24,35 @@
 
 ## Milestone 3 — Firmware Regression Lab
 
-- [ ] Matched treatment/control cohorts
-- [ ] Pre/post firmware comparisons
-- [ ] Propensity matching or stratification
-- [ ] Statistical significance and effect size
-- [ ] Automated regression alert
+- [x] Matched treatment/control cohorts
+- [ ] Pre/post rollout timeline comparisons
+- [x] Coarsened exact matching / stratification
+- [x] Statistical significance and effect size
+- [x] Automated regression classification
+- [x] Hardware × firmware interaction analysis
+- [x] Firmware regression engineering dashboard
 - [ ] Rollout adoption visualization
 
 ## Milestone 4 — Predictive Maintenance ML
 
-- [ ] Feature store
-- [ ] XGBoost failure classifier baseline
+- [x] Rolling telemetry feature windows with leakage guard
+- [x] Right-censored future-horizon labeling
+- [x] Frozen vehicle-level benchmark + validation/development separation
+- [x] XGBoost failure classifier
+- [x] Validation-derived operational threshold
+- [x] Probability calibration framework
+- [x] ROC-AUC / PR-AUC / precision / recall / F1 / Brier evaluation
+- [x] ML early-warning lead-distance metric
+- [x] Persisted model runs and live vehicle predictions
+- [x] Logistic-regression baseline on identical features/cohorts
+- [x] Benchmark evidence qualification gate
+- [x] Operational scoring vs benchmark-claim separation
+- [x] Longitudinal per-vehicle prediction history
+- [x] Predictive Maintenance ML dashboard
 - [ ] Survival/RUL model
 - [ ] Time-series model benchmark
 - [ ] MLflow experiment tracking
-- [ ] Model registry and versioned inference
+- [ ] External model registry / promotion workflow
 
 ## Milestone 5 — Root Cause Intelligence
 

@@ -66,3 +66,48 @@ class FailureEvent(Base):
     failure_mileage: Mapped[float] = mapped_column(Float, index=True)
     fault_code: Mapped[str] = mapped_column(String(32))
     simulation_time_acceleration: Mapped[float] = mapped_column(Float, default=600.0)
+
+
+class MLModelRun(Base):
+    __tablename__ = "ml_model_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    algorithm: Mapped[str] = mapped_column(String(64))
+    horizon_miles: Mapped[float] = mapped_column(Float)
+    window_size: Mapped[int] = mapped_column(Integer)
+    train_examples: Mapped[int] = mapped_column(Integer, default=0)
+    validation_examples: Mapped[int] = mapped_column(Integer, default=0)
+    test_examples: Mapped[int] = mapped_column(Integer, default=0)
+    train_positives: Mapped[int] = mapped_column(Integer, default=0)
+    validation_positives: Mapped[int] = mapped_column(Integer, default=0)
+    test_positives: Mapped[int] = mapped_column(Integer, default=0)
+    decision_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    metrics_json: Mapped[str] = mapped_column(Text, default="{}")
+    calibration_json: Mapped[str] = mapped_column(Text, default="[]")
+    feature_importance_json: Mapped[str] = mapped_column(Text, default="[]")
+    leakage_policy_json: Mapped[str] = mapped_column(Text, default="{}")
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class MLPrediction(Base):
+    __tablename__ = "ml_predictions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    model_run_id: Mapped[int] = mapped_column(Integer, index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
+    probability: Mapped[float] = mapped_column(Float, index=True)
+    predicted_label: Mapped[int] = mapped_column(Integer)
+    anchor_mileage: Mapped[float] = mapped_column(Float)
+    firmware: Mapped[str] = mapped_column(String(32), index=True)
+    pump_revision: Mapped[str] = mapped_column(String(32), index=True)
+    factory: Mapped[str] = mapped_column(String(32), index=True)
+    model: Mapped[str] = mapped_column(String(32))
+    feature_summary_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    __table_args__ = (
+        Index("ix_ml_prediction_run_probability", "model_run_id", "probability"),
+    )

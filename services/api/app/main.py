@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,8 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from fleetmind_common.db import Base, SessionLocal, engine
-from fleetmind_common.models import Alert, FailureEvent, Telemetry
+from fleetmind_common.models import Alert, FailureEvent, MLModelRun, MLPrediction, Telemetry
+from fleetmind_common.firmware import FirmwareObservation, compare_firmware, hardware_interactions
 from fleetmind_common.reliability import (
     ReliabilityObservation,
     fit_weibull_right_censored,
@@ -16,7 +18,7 @@ from fleetmind_common.reliability import (
     median_or_none,
 )
 
-app = FastAPI(title="FleetMind API", version="0.2.0")
+app = FastAPI(title="FleetMind API", version="0.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -49,6 +51,36 @@ def latest_vehicle_rows(db: Session) -> list[Telemetry]:
         select(Telemetry).join(latest, Telemetry.id == latest.c.max_id)
     ).scalars().all()
 
+
+
+def firmware_observations(db: Session) -> list[FirmwareObservation]:
+    latest_rows = latest_vehicle_rows(db)
+    failed_vehicle_ids = set(db.execute(select(FailureEvent.vehicle_id)).scalars().all())
+    return [
+        FirmwareObservation(
+            firmware=row.firmware,
+            pump_revision=row.pump_revision,
+            factory=row.factory,
+            model=row.model,
+            mileage=float(row.mileage),
+            ambient_temp_c=float(row.ambient_temp_c),
+            failed=row.vehicle_id in failed_vehicle_ids,
+            risk_score=float(row.risk_score),
+            non_healthy=row.status != "healthy",
+            pump_current_a=float(row.pump_current_a),
+        )
+        for row in latest_rows
+    ]
+
+
+def _round_nested(value):
+    if isinstance(value, float):
+        return round(value, 6)
+    if isinstance(value, list):
+        return [_round_nested(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _round_nested(item) for key, item in value.items()}
+    return value
 
 def warning_metrics(db: Session, failure: FailureEvent) -> dict:
     warning = db.execute(
@@ -89,7 +121,7 @@ def warning_metrics(db: Session, failure: FailureEvent) -> dict:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "fleetmind-api", "version": "0.2.0"}
+    return {"status": "ok", "service": "fleetmind-api", "version": "0.4.0"}
 
 
 @app.get("/api/v1/fleet/summary")
@@ -340,3 +372,252 @@ def reliability_failures(
         }
         for row in rows
     ]
+
+
+@app.get("/api/v1/firmware/regression")
+def firmware_regression(
+    target: str = Query(default="2026.32.4"),
+    control: str = Query(default="2026.32.1"),
+    db: Session = Depends(db_session),
+) -> dict:
+    if target == control:
+        raise HTTPException(status_code=400, detail="target and control firmware must differ")
+
+    observations = firmware_observations(db)
+    firmwares = sorted({item.firmware for item in observations})
+    if target not in firmwares:
+        raise HTTPException(status_code=404, detail=f"Target firmware {target} not found")
+    if control not in firmwares:
+        raise HTTPException(status_code=404, detail=f"Control firmware {control} not found")
+
+    comparison = compare_firmware(observations, target, control)
+    interactions = hardware_interactions(observations, target, control)
+
+    return _round_nested(
+        {
+            **comparison,
+            "hardwareInteractions": interactions,
+            "availableFirmware": firmwares,
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "interpretation": {
+                "method": "Coarsened exact matching + Cochran-Mantel-Haenszel association test",
+                "claimPolicy": "Regression labels require a matched population of at least 30 vehicles and at least 2 observed failures.",
+                "telemetrySignalsAreSupportive": True,
+            },
+        }
+    )
+
+
+@app.get("/api/v1/firmware/overview")
+def firmware_overview(db: Session = Depends(db_session)) -> list[dict]:
+    observations = firmware_observations(db)
+    rows: list[dict] = []
+    for firmware in sorted({item.firmware for item in observations}):
+        scoped = [item for item in observations if item.firmware == firmware]
+        population = len(scoped)
+        failures = sum(1 for item in scoped if item.failed)
+        rows.append(
+            {
+                "firmware": firmware,
+                "population": population,
+                "failures": failures,
+                "failureRate": round(failures / population, 6) if population else 0.0,
+                "averageRisk": round(sum(item.risk_score for item in scoped) / population, 6) if population else 0.0,
+                "nonHealthyRate": round(sum(1 for item in scoped if item.non_healthy) / population, 6) if population else 0.0,
+                "averagePumpCurrentA": round(sum(item.pump_current_a for item in scoped) / population, 4) if population else 0.0,
+            }
+        )
+    return rows
+
+
+
+def _json_or(value: str | None, fallback):
+    if not value:
+        return fallback
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return fallback
+
+
+def _model_run_payload(run: MLModelRun) -> dict:
+    metrics = _json_or(run.metrics_json, {})
+    benchmark = {"examples": run.test_examples, "positives": run.test_positives}
+    return {
+        "runId": run.id,
+        "createdAt": run.created_at.isoformat(),
+        "completedAt": run.completed_at.isoformat() if run.completed_at else None,
+        "status": run.status,
+        "algorithm": run.algorithm,
+        "horizonMiles": run.horizon_miles,
+        "windowSize": run.window_size,
+        "dataset": {
+            "train": {"examples": run.train_examples, "positives": run.train_positives},
+            "validation": {"examples": run.validation_examples, "positives": run.validation_positives},
+            "benchmark": benchmark,
+            # Backward-compatible alias for Phase 5 clients.
+            "test": benchmark,
+        },
+        "decisionThreshold": run.decision_threshold,
+        "metrics": metrics,
+        "benchmarkQualification": metrics.get("benchmarkQualification"),
+        "baseline": metrics.get("baseline"),
+        "modelDeltaVsBaseline": metrics.get("modelDeltaVsBaseline"),
+        "benchmarkProtocol": metrics.get("benchmarkProtocol"),
+        "operationalScoring": metrics.get("operationalScoring"),
+        "calibration": _json_or(run.calibration_json, []),
+        "featureImportance": _json_or(run.feature_importance_json, []),
+        "leakagePolicy": _json_or(run.leakage_policy_json, {}),
+        "notes": run.notes,
+    }
+
+
+@app.get("/api/v1/ml/status")
+def ml_status(db: Session = Depends(db_session)) -> dict:
+    run = db.execute(
+        select(MLModelRun).order_by(desc(MLModelRun.created_at), desc(MLModelRun.id)).limit(1)
+    ).scalar_one_or_none()
+    if run is None:
+        return {
+            "status": "waiting_for_trainer",
+            "message": "No predictive-maintenance training run has been recorded yet.",
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+        }
+    return {
+        **_model_run_payload(run),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/v1/ml/benchmark")
+def ml_benchmark(db: Session = Depends(db_session)) -> dict:
+    run = db.execute(
+        select(MLModelRun)
+        .where(MLModelRun.status == "complete")
+        .order_by(desc(MLModelRun.completed_at), desc(MLModelRun.id))
+        .limit(1)
+    ).scalar_one_or_none()
+    if run is None:
+        return {
+            "status": "waiting_for_trainer",
+            "message": "No complete predictive-maintenance run is available yet.",
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+        }
+
+    payload = _model_run_payload(run)
+    return {
+        "runId": run.id,
+        "status": payload.get("benchmarkQualification", {}).get("status", "legacy_run"),
+        "qualification": payload.get("benchmarkQualification"),
+        "protocol": payload.get("benchmarkProtocol"),
+        "xgboost": payload.get("metrics"),
+        "baseline": payload.get("baseline"),
+        "deltaVsBaseline": payload.get("modelDeltaVsBaseline"),
+        "dataset": payload.get("dataset"),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/v1/ml/predictions")
+def ml_predictions(
+    limit: int = Query(default=25, ge=1, le=500),
+    db: Session = Depends(db_session),
+) -> list[dict]:
+    run = db.execute(
+        select(MLModelRun)
+        .where(MLModelRun.status == "complete")
+        .order_by(desc(MLModelRun.completed_at), desc(MLModelRun.id))
+        .limit(1)
+    ).scalar_one_or_none()
+    if run is None:
+        return []
+
+    rows = db.execute(
+        select(MLPrediction)
+        .where(MLPrediction.model_run_id == run.id)
+        .order_by(desc(MLPrediction.probability))
+        .limit(limit)
+    ).scalars().all()
+    return [
+        {
+            "modelRunId": row.model_run_id,
+            "generatedAt": row.generated_at.isoformat(),
+            "vehicleId": row.vehicle_id,
+            "probability": row.probability,
+            "predictedFailureWithinHorizon": bool(row.predicted_label),
+            "anchorMileage": row.anchor_mileage,
+            "firmware": row.firmware,
+            "pumpRevision": row.pump_revision,
+            "factory": row.factory,
+            "model": row.model,
+            "featureSummary": _json_or(row.feature_summary_json, {}),
+            "horizonMiles": run.horizon_miles,
+            "decisionThreshold": run.decision_threshold,
+        }
+        for row in rows
+    ]
+
+
+@app.get("/api/v1/ml/vehicles/{vehicle_id}")
+def ml_vehicle_prediction(vehicle_id: str, db: Session = Depends(db_session)) -> dict:
+    row = db.execute(
+        select(MLPrediction)
+        .where(MLPrediction.vehicle_id == vehicle_id)
+        .order_by(desc(MLPrediction.generated_at), desc(MLPrediction.id))
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No ML prediction available for vehicle")
+    run = db.get(MLModelRun, row.model_run_id)
+    return {
+        "vehicleId": row.vehicle_id,
+        "probability": row.probability,
+        "predictedFailureWithinHorizon": bool(row.predicted_label),
+        "generatedAt": row.generated_at.isoformat(),
+        "anchorMileage": row.anchor_mileage,
+        "firmware": row.firmware,
+        "pumpRevision": row.pump_revision,
+        "factory": row.factory,
+        "model": row.model,
+        "featureSummary": _json_or(row.feature_summary_json, {}),
+        "modelRun": _model_run_payload(run) if run else None,
+    }
+
+@app.get("/api/v1/ml/vehicles/{vehicle_id}/history")
+def ml_vehicle_prediction_history(
+    vehicle_id: str,
+    limit: int = Query(default=60, ge=2, le=250),
+    db: Session = Depends(db_session),
+) -> dict:
+    rows = db.execute(
+        select(MLPrediction, MLModelRun)
+        .join(MLModelRun, MLModelRun.id == MLPrediction.model_run_id)
+        .where(
+            MLPrediction.vehicle_id == vehicle_id,
+            MLModelRun.status == "complete",
+        )
+        .order_by(desc(MLPrediction.generated_at), desc(MLPrediction.id))
+        .limit(limit)
+    ).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="No ML prediction history available for vehicle")
+
+    points = [
+        {
+            "modelRunId": prediction.model_run_id,
+            "generatedAt": prediction.generated_at.isoformat(),
+            "anchorMileage": prediction.anchor_mileage,
+            "probability": prediction.probability,
+            "decisionThreshold": run.decision_threshold,
+            "predictedFailureWithinHorizon": bool(prediction.predicted_label),
+            "firmware": prediction.firmware,
+            "pumpRevision": prediction.pump_revision,
+        }
+        for prediction, run in reversed(rows)
+    ]
+    return {
+        "vehicleId": vehicle_id,
+        "points": points,
+        "latest": points[-1],
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
