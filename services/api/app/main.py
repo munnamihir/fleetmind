@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from fleetmind_common.db import Base, SessionLocal, engine
 from fleetmind_common.models import Alert, FailureEvent, Telemetry
+from fleetmind_common.firmware import FirmwareObservation, compare_firmware, hardware_interactions
 from fleetmind_common.reliability import (
     ReliabilityObservation,
     fit_weibull_right_censored,
@@ -16,7 +17,7 @@ from fleetmind_common.reliability import (
     median_or_none,
 )
 
-app = FastAPI(title="FleetMind API", version="0.2.0")
+app = FastAPI(title="FleetMind API", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -49,6 +50,36 @@ def latest_vehicle_rows(db: Session) -> list[Telemetry]:
         select(Telemetry).join(latest, Telemetry.id == latest.c.max_id)
     ).scalars().all()
 
+
+
+def firmware_observations(db: Session) -> list[FirmwareObservation]:
+    latest_rows = latest_vehicle_rows(db)
+    failed_vehicle_ids = set(db.execute(select(FailureEvent.vehicle_id)).scalars().all())
+    return [
+        FirmwareObservation(
+            firmware=row.firmware,
+            pump_revision=row.pump_revision,
+            factory=row.factory,
+            model=row.model,
+            mileage=float(row.mileage),
+            ambient_temp_c=float(row.ambient_temp_c),
+            failed=row.vehicle_id in failed_vehicle_ids,
+            risk_score=float(row.risk_score),
+            non_healthy=row.status != "healthy",
+            pump_current_a=float(row.pump_current_a),
+        )
+        for row in latest_rows
+    ]
+
+
+def _round_nested(value):
+    if isinstance(value, float):
+        return round(value, 6)
+    if isinstance(value, list):
+        return [_round_nested(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _round_nested(item) for key, item in value.items()}
+    return value
 
 def warning_metrics(db: Session, failure: FailureEvent) -> dict:
     warning = db.execute(
@@ -89,7 +120,7 @@ def warning_metrics(db: Session, failure: FailureEvent) -> dict:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "fleetmind-api", "version": "0.2.0"}
+    return {"status": "ok", "service": "fleetmind-api", "version": "0.3.0"}
 
 
 @app.get("/api/v1/fleet/summary")
@@ -340,3 +371,59 @@ def reliability_failures(
         }
         for row in rows
     ]
+
+
+@app.get("/api/v1/firmware/regression")
+def firmware_regression(
+    target: str = Query(default="2026.32.4"),
+    control: str = Query(default="2026.32.1"),
+    db: Session = Depends(db_session),
+) -> dict:
+    if target == control:
+        raise HTTPException(status_code=400, detail="target and control firmware must differ")
+
+    observations = firmware_observations(db)
+    firmwares = sorted({item.firmware for item in observations})
+    if target not in firmwares:
+        raise HTTPException(status_code=404, detail=f"Target firmware {target} not found")
+    if control not in firmwares:
+        raise HTTPException(status_code=404, detail=f"Control firmware {control} not found")
+
+    comparison = compare_firmware(observations, target, control)
+    interactions = hardware_interactions(observations, target, control)
+
+    return _round_nested(
+        {
+            **comparison,
+            "hardwareInteractions": interactions,
+            "availableFirmware": firmwares,
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "interpretation": {
+                "method": "Coarsened exact matching + Cochran-Mantel-Haenszel association test",
+                "claimPolicy": "Regression labels require a matched population of at least 30 vehicles and at least 2 observed failures.",
+                "telemetrySignalsAreSupportive": True,
+            },
+        }
+    )
+
+
+@app.get("/api/v1/firmware/overview")
+def firmware_overview(db: Session = Depends(db_session)) -> list[dict]:
+    observations = firmware_observations(db)
+    rows: list[dict] = []
+    for firmware in sorted({item.firmware for item in observations}):
+        scoped = [item for item in observations if item.firmware == firmware]
+        population = len(scoped)
+        failures = sum(1 for item in scoped if item.failed)
+        rows.append(
+            {
+                "firmware": firmware,
+                "population": population,
+                "failures": failures,
+                "failureRate": round(failures / population, 6) if population else 0.0,
+                "averageRisk": round(sum(item.risk_score for item in scoped) / population, 6) if population else 0.0,
+                "nonHealthyRate": round(sum(1 for item in scoped if item.non_healthy) / population, 6) if population else 0.0,
+                "averagePumpCurrentA": round(sum(item.pump_current_a for item in scoped) / population, 4) if population else 0.0,
+            }
+        )
+    return rows

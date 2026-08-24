@@ -18,7 +18,7 @@ import {
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
-type Page = 'fleet' | 'reliability';
+type Page = 'fleet' | 'reliability' | 'firmware';
 
 type Summary = {
   vehiclesMonitored: number;
@@ -107,6 +107,77 @@ type FailureRow = {
   };
 };
 
+
+type FirmwareOverviewRow = {
+  firmware: string;
+  population: number;
+  failures: number;
+  failureRate: number;
+  averageRisk: number;
+  nonHealthyRate: number;
+  averagePumpCurrentA: number;
+};
+
+type FirmwareInteraction = {
+  pumpRevision: string;
+  targetPopulation: number;
+  controlPopulation: number;
+  targetFailures: number;
+  controlFailures: number;
+  targetFailureRate: number;
+  controlFailureRate: number;
+  riskRatio: number | null;
+  riskRatio95CI: [number, number] | null;
+  absoluteRiskIncrease: number;
+  targetAverageRisk: number;
+  controlAverageRisk: number;
+  averageRiskDelta: number;
+};
+
+type FirmwareRegression = {
+  targetFirmware: string;
+  controlFirmware: string;
+  matching: {
+    dimensions: string[];
+    matchedStrata: number;
+    matchedPopulation: number;
+    targetPopulation: number;
+    controlPopulation: number;
+  };
+  outcomes: {
+    targetFailures: number;
+    controlFailures: number;
+    targetFailureRate: number;
+    controlFailureRate: number;
+    absoluteRiskIncrease: number;
+    riskRatio: number | null;
+    riskRatio95CI: [number, number] | null;
+    mantelHaenszelOddsRatio: number | null;
+    cmhChiSquare: number | null;
+    pValue: number | null;
+  };
+  telemetrySignals: {
+    targetAverageRisk: number;
+    controlAverageRisk: number;
+    averageRiskDelta: number;
+    targetNonHealthyRate: number;
+    controlNonHealthyRate: number;
+    nonHealthyRateDelta: number;
+    targetPumpCurrentA: number;
+    controlPumpCurrentA: number;
+    pumpCurrentDeltaA: number;
+  };
+  classification: string;
+  hardwareInteractions: FirmwareInteraction[];
+  availableFirmware: string[];
+  generatedAt: string;
+  interpretation: {
+    method: string;
+    claimPolicy: string;
+    telemetrySignalsAreSupportive: boolean;
+  };
+};
+
 const emptySummary: Summary = {
   vehiclesMonitored: 0,
   telemetryEvents: 0,
@@ -145,18 +216,22 @@ export function App() {
   const [cohorts, setCohorts] = useState<Cohort[]>([]);
   const [reliability, setReliability] = useState<ReliabilityCohort[]>([]);
   const [failures, setFailures] = useState<FailureRow[]>([]);
+  const [firmwareOverview, setFirmwareOverview] = useState<FirmwareOverviewRow[]>([]);
+  const [firmwareRegression, setFirmwareRegression] = useState<FirmwareRegression | null>(null);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     let alive = true;
     async function refresh() {
       try {
-        const [s, a, c, r, f] = await Promise.all([
+        const [s, a, c, r, f, fo, fr] = await Promise.all([
           fetch(`${API}/api/v1/fleet/summary`).then(response => response.json()),
           fetch(`${API}/api/v1/alerts?limit=10`).then(response => response.json()),
           fetch(`${API}/api/v1/cohorts/pump-revisions`).then(response => response.json()),
           fetch(`${API}/api/v1/reliability/pump-revisions`).then(response => response.json()),
           fetch(`${API}/api/v1/reliability/failures?limit=12`).then(response => response.json()),
+          fetch(`${API}/api/v1/firmware/overview`).then(response => response.json()),
+          fetch(`${API}/api/v1/firmware/regression?target=2026.32.4&control=2026.32.1`).then(response => response.json()),
         ]);
         if (alive) {
           setSummary(s);
@@ -164,6 +239,8 @@ export function App() {
           setCohorts(c);
           setReliability(r);
           setFailures(f);
+          setFirmwareOverview(fo);
+          setFirmwareRegression(fr);
           setConnected(true);
         }
       } catch {
@@ -211,7 +288,7 @@ export function App() {
           </button>
           <button><Binary size={17} /> Cohorts</button>
           <button><Cpu size={17} /> Components</button>
-          <button><Zap size={17} /> Firmware</button>
+          <button className={page === 'firmware' ? 'navActive' : ''} onClick={() => setPage('firmware')}><Zap size={17} /> Firmware</button>
         </nav>
         <div className="sidebarFoot">
           <Radio size={15} />
@@ -228,11 +305,16 @@ export function App() {
             alerts={alerts}
             cohorts={cohorts}
           />
-        ) : (
+        ) : page === 'reliability' ? (
           <ReliabilityDashboard
             reliability={reliability}
             failures={failures}
             observedFailures={summary.observedFailures}
+          />
+        ) : (
+          <FirmwareDashboard
+            overview={firmwareOverview}
+            regression={firmwareRegression}
           />
         )}
       </main>
@@ -245,12 +327,14 @@ function Header({ connected, page }: { connected: boolean; page: Page }) {
     <header>
       <div>
         <p className="eyebrow">
-          {page === 'fleet' ? 'GLOBAL FLEET INTELLIGENCE' : 'RELIABILITY SCIENCE / COOLANT PUMP'}
+          {page === 'fleet' ? 'GLOBAL FLEET INTELLIGENCE' : page === 'reliability' ? 'RELIABILITY SCIENCE / COOLANT PUMP' : 'FIRMWARE REGRESSION LAB / MATCHED COHORTS'}
         </p>
         <h1>
           {page === 'fleet'
             ? 'Machine health, before the fault code.'
-            : 'Field reliability, quantified from observed life.'}
+            : page === 'reliability'
+              ? 'Field reliability, quantified from observed life.'
+              : 'Did the software change the failure rate?'}
         </h1>
       </div>
       <div className={`live ${connected ? 'on' : ''}`}>
@@ -480,6 +564,178 @@ function ReliabilityDashboard({
       </section>
     </>
   );
+}
+
+
+function FirmwareDashboard({
+  overview,
+  regression,
+}: {
+  overview: FirmwareOverviewRow[];
+  regression: FirmwareRegression | null;
+}) {
+  const outcome = regression?.outcomes;
+  const signals = regression?.telemetrySignals;
+  const interaction = regression?.hardwareInteractions?.[0];
+  const status = regression?.classification ?? 'insufficient_data';
+  const rr = outcome?.riskRatio;
+  const ci = outcome?.riskRatio95CI;
+  const p = outcome?.pValue;
+
+  return (
+    <>
+      <section className="metrics firmwareMetrics">
+        <Metric icon={<Zap />} label="Regression state" value={statusLabel(status)} detail={regression ? `${regression.targetFirmware} vs ${regression.controlFirmware}` : 'waiting for matched cohorts'} />
+        <Metric icon={<TrendingDown />} label="Failure risk ratio" value={rr == null ? '—' : `${rr.toFixed(2)}×`} detail={ci ? `95% CI ${ci[0].toFixed(2)}–${ci[1].toFixed(2)}` : 'effect estimate pending'} />
+        <Metric icon={<Sigma />} label="CMH p-value" value={p == null ? '—' : formatPValue(p)} detail={regression ? `${regression.matching.matchedStrata} matched strata` : 'stratified association test'} />
+        <Metric icon={<Thermometer />} label="Risk-score delta" value={signals ? signedPct(signals.averageRiskDelta) : '—'} detail={signals ? `${signals.pumpCurrentDeltaA >= 0 ? '+' : ''}${signals.pumpCurrentDeltaA.toFixed(3)} A pump current` : 'supportive telemetry signal'} />
+      </section>
+
+      <section className="firmwareHeroGrid">
+        <article className="panel regressionPanel">
+          <div className="panelTitleRow">
+            <PanelTitle kicker="MATCHED-COHORT ANALYSIS" title="Firmware 2026.32.4 regression test" />
+            <span className={`regressionBadge ${status}`}>{statusLabel(status)}</span>
+          </div>
+
+          {regression ? (
+            <>
+              <div className="comparisonStrip">
+                <FirmwareArm label="TARGET" firmware={regression.targetFirmware} population={regression.matching.targetPopulation} failures={outcome?.targetFailures ?? 0} rate={outcome?.targetFailureRate ?? 0} />
+                <div className="versus">VS</div>
+                <FirmwareArm label="CONTROL" firmware={regression.controlFirmware} population={regression.matching.controlPopulation} failures={outcome?.controlFailures ?? 0} rate={outcome?.controlFailureRate ?? 0} />
+              </div>
+
+              <div className="effectGrid">
+                <Parameter label="Risk ratio" value={rr == null ? '—' : `${rr.toFixed(3)}×`} note={ci ? `95% CI ${ci[0].toFixed(2)}–${ci[1].toFixed(2)}` : 'continuity-corrected when needed'} />
+                <Parameter label="Absolute risk increase" value={formatSignedPct(outcome?.absoluteRiskIncrease)} note="target minus matched control" />
+                <Parameter label="MH odds ratio" value={outcome?.mantelHaenszelOddsRatio == null ? '—' : `${outcome.mantelHaenszelOddsRatio.toFixed(3)}×`} note="common stratified odds ratio" />
+                <Parameter label="CMH significance" value={p == null ? '—' : formatPValue(p)} note={p != null && p < 0.05 ? 'statistically significant' : 'not yet significant'} />
+              </div>
+
+              <div className="matchingNote">
+                <Binary size={16} />
+                <div>
+                  <b>{regression.matching.matchedPopulation} vehicles across {regression.matching.matchedStrata} matched strata</b>
+                  <span>Coarsened exact matching on component revision, 40k-mile odometer band, and ambient-temperature band; factory/model remain visible for follow-up slicing.</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="modelWaiting"><Zap size={28} /><strong>Waiting for firmware comparison</strong><p>The API will populate this panel when both target and control firmware cohorts are present.</p></div>
+          )}
+        </article>
+
+        <article className="panel interactionPanel">
+          <PanelTitle kicker="HARDWARE × SOFTWARE" title="Strongest interaction" />
+          {interaction ? (
+            <>
+              <div className="interactionHero">
+                <span>Most affected component revision</span>
+                <strong>{interaction.pumpRevision}</strong>
+                <small>{formatPct(interaction.targetFailureRate)} target failure rate · {formatPct(interaction.controlFailureRate)} control</small>
+              </div>
+              <div className="interactionSignal">
+                <div><span>Failure-rate lift</span><b>{formatSignedPct(interaction.absoluteRiskIncrease)}</b></div>
+                <div><span>Risk-score lift</span><b>{signedPct(interaction.averageRiskDelta)}</b></div>
+                <div><span>Risk ratio</span><b>{interaction.riskRatio == null ? '—' : `${interaction.riskRatio.toFixed(2)}×`}</b></div>
+              </div>
+              <div className="engineeringNote firmwareNote"><ShieldCheck size={16} /><p>This view isolates whether the firmware effect concentrates in a specific hardware revision instead of appearing uniformly across the fleet.</p></div>
+            </>
+          ) : (
+            <div className="modelWaiting"><Cpu size={28} /><strong>No interaction yet</strong><p>FleetMind needs both firmware versions represented within the same component revision.</p></div>
+          )}
+        </article>
+      </section>
+
+      <section className="grid firmwareLower">
+        <article className="panel firmwareOverviewPanel">
+          <PanelTitle kicker="FIRMWARE SCORECARD" title="Fleet outcomes by software version" />
+          <div className="firmwareTableHead">
+            <span>Firmware</span><span>Population</span><span>Failures</span><span>Failure rate</span><span>Avg risk</span><span>Non-healthy</span><span>Pump current</span>
+          </div>
+          {overview.map(row => (
+            <div className="firmwareTableRow" key={row.firmware}>
+              <b>{row.firmware}</b>
+              <span>{row.population}</span>
+              <span>{row.failures}</span>
+              <strong className={row.failureRate > 0.05 ? 'hot' : ''}>{formatPct(row.failureRate)}</strong>
+              <span>{formatPct(row.averageRisk)}</span>
+              <span>{formatPct(row.nonHealthyRate)}</span>
+              <span>{row.averagePumpCurrentA.toFixed(3)} A</span>
+            </div>
+          ))}
+          {overview.length === 0 && <div className="empty">Waiting for firmware cohorts…</div>}
+        </article>
+
+        <article className="panel methodPanel">
+          <PanelTitle kicker="METHOD" title="What counts as evidence" />
+          <div className="methodStack">
+            <MethodStep index="01" title="Coarsened exact matching" text="Compare only vehicles sharing component revision, odometer band and ambient-temperature band to preserve enough events for a 500-vehicle demo fleet." />
+            <MethodStep index="02" title="Observed failures" text="Ground-truth component failures are the primary outcome; telemetry risk remains supportive evidence." />
+            <MethodStep index="03" title="CMH adjustment" text="Use a Cochran–Mantel–Haenszel test to estimate association across matched strata." />
+            <MethodStep index="04" title="Claim threshold" text="Regression labels require ≥30 matched vehicles and ≥2 observed failures before FleetMind will call it." />
+          </div>
+        </article>
+      </section>
+
+      <section className="panel interactionTablePanel">
+        <div className="panelTitleRow">
+          <PanelTitle kicker="INTERACTION MATRIX" title="Firmware effect by component revision" />
+          <span className="methodBadge">target vs control</span>
+        </div>
+        <div className="interactionTableHead">
+          <span>Revision</span><span>Target pop.</span><span>Control pop.</span><span>Target failures</span><span>Control failures</span><span>Risk ratio</span><span>Risk lift</span><span>Risk-score Δ</span>
+        </div>
+        {regression?.hardwareInteractions.map(row => (
+          <div className="interactionTableRow" key={row.pumpRevision}>
+            <b>{row.pumpRevision}</b>
+            <span>{row.targetPopulation}</span>
+            <span>{row.controlPopulation}</span>
+            <span>{row.targetFailures}</span>
+            <span>{row.controlFailures}</span>
+            <span>{row.riskRatio == null ? '—' : `${row.riskRatio.toFixed(2)}×`}</span>
+            <strong className={row.absoluteRiskIncrease > 0.02 ? 'hot' : ''}>{formatSignedPct(row.absoluteRiskIncrease)}</strong>
+            <span>{signedPct(row.averageRiskDelta)}</span>
+          </div>
+        ))}
+      </section>
+    </>
+  );
+}
+
+function FirmwareArm({ label, firmware, population, failures, rate }: { label: string; firmware: string; population: number; failures: number; rate: number }) {
+  return (
+    <div className="firmwareArm">
+      <span>{label}</span>
+      <strong>{firmware}</strong>
+      <div><b>{failures}</b> failures / {population} matched vehicles</div>
+      <small>{formatPct(rate)} observed failure rate</small>
+    </div>
+  );
+}
+
+function MethodStep({ index, title, text }: { index: string; title: string; text: string }) {
+  return <div className="methodStep"><span>{index}</span><div><b>{title}</b><p>{text}</p></div></div>;
+}
+
+function statusLabel(value: string) {
+  return humanize(value).replace('Critical Regression', 'Critical');
+}
+
+function formatPValue(value: number) {
+  if (value < 0.001) return '<0.001';
+  return value.toFixed(3);
+}
+
+function formatSignedPct(value: number | null | undefined) {
+  if (value == null) return '—';
+  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)} pp`;
+}
+
+function signedPct(value: number | null | undefined) {
+  if (value == null) return '—';
+  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}%`;
 }
 
 function SurvivalChart({ cohorts }: { cohorts: ReliabilityCohort[] }) {

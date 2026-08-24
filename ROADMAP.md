@@ -24,11 +24,13 @@
 
 ## Milestone 3 — Firmware Regression Lab
 
-- [ ] Matched treatment/control cohorts
-- [ ] Pre/post firmware comparisons
-- [ ] Propensity matching or stratification
-- [ ] Statistical significance and effect size
-- [ ] Automated regression alert
+- [x] Matched treatment/control cohorts
+- [ ] Pre/post rollout timeline comparisons
+- [x] Coarsened exact matching / stratification
+- [x] Statistical significance and effect size
+- [x] Automated regression classification
+- [x] Hardware × firmware interaction analysis
+- [x] Firmware regression engineering dashboard
 - [ ] Rollout adoption visualization
 
 ## Milestone 4 — Predictive Maintenance ML

@@ -40,7 +40,7 @@ def build_fleet(vehicle_count: int, seed: int = 20260824) -> list[Vehicle]:
     firmware = ["2026.28.7", "2026.32.1", "2026.32.4"]
 
     for i in range(vehicle_count):
-        pump_revision = "CP-17" if rng.random() < 0.12 else rng.choice(["CP-15", "CP-16"])
+        pump_revision = "CP-17" if rng.random() < 0.25 else rng.choice(["CP-15", "CP-16"])
         ambient = rng.uniform(16, 39)
         mileage = rng.uniform(800, 85000)
         fw = rng.choices(firmware, weights=[0.25, 0.42, 0.33], k=1)[0]
@@ -50,10 +50,10 @@ def build_fleet(vehicle_count: int, seed: int = 20260824) -> list[Vehicle]:
         if pump_revision == "CP-17":
             mileage_factor = max(0.0, min(1.0, (mileage - 18000) / 36000))
             heat_factor = max(0.0, min(1.0, (ambient - 27) / 12))
-            fw_factor = 0.12 if fw == "2026.32.4" else 0.0
+            fw_factor = 0.32 if fw == "2026.32.4" else 0.0
             base_degradation = min(1.0, 0.08 + 0.58 * mileage_factor + 0.34 * heat_factor + fw_factor)
             # Unit-to-unit variation produces a distribution of field lifetimes.
-            failure_threshold = rng.uniform(0.93, 0.995)
+            failure_threshold = rng.uniform(0.82, 0.90) if fw == "2026.32.4" else rng.uniform(0.93, 0.995)
 
         fleet.append(
             Vehicle(
@@ -93,7 +93,8 @@ def _sample_internal(
     driven_miles = max(0.0, vehicle.mileage - float(vehicle.initial_mileage or vehicle.mileage))
 
     if vehicle.pump_revision == "CP-17":
-        progression = min(1.0, vehicle.latent_degradation + 0.35 * driven_miles / 12000.0)
+        progression_rate = 0.80 if vehicle.firmware == "2026.32.4" else 0.28
+        progression = min(1.0, vehicle.latent_degradation + progression_rate * driven_miles / 12000.0)
     else:
         progression = min(1.0, vehicle.latent_degradation + 0.02 * driven_miles / 100000.0)
 
