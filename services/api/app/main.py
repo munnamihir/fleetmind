@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,9 +8,15 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from fleetmind_common.db import Base, SessionLocal, engine
-from fleetmind_common.models import Alert, Telemetry
+from fleetmind_common.models import Alert, FailureEvent, Telemetry
+from fleetmind_common.reliability import (
+    ReliabilityObservation,
+    fit_weibull_right_censored,
+    kaplan_meier,
+    median_or_none,
+)
 
-app = FastAPI(title="FleetMind API", version="0.1.0")
+app = FastAPI(title="FleetMind API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -32,19 +39,64 @@ def db_session():
         db.close()
 
 
+def latest_vehicle_rows(db: Session) -> list[Telemetry]:
+    latest = (
+        select(Telemetry.vehicle_id, func.max(Telemetry.id).label("max_id"))
+        .group_by(Telemetry.vehicle_id)
+        .subquery()
+    )
+    return db.execute(
+        select(Telemetry).join(latest, Telemetry.id == latest.c.max_id)
+    ).scalars().all()
+
+
+def warning_metrics(db: Session, failure: FailureEvent) -> dict:
+    warning = db.execute(
+        select(Telemetry)
+        .where(
+            Telemetry.vehicle_id == failure.vehicle_id,
+            Telemetry.status != "healthy",
+            Telemetry.timestamp <= failure.occurred_at,
+        )
+        .order_by(Telemetry.timestamp)
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if warning is None:
+        return {
+            "detectedBeforeFailure": False,
+            "firstWarningAt": None,
+            "warningMileage": None,
+            "leadMiles": None,
+            "leadSeconds": None,
+            "leadSimulatedHours": None,
+            "leadSimulatedDays": None,
+        }
+
+    lead_miles = max(0.0, failure.failure_mileage - warning.mileage)
+    lead_seconds = max(0.0, (failure.occurred_at - warning.timestamp).total_seconds())
+    simulated_hours = lead_seconds * failure.simulation_time_acceleration / 3600.0
+    return {
+        "detectedBeforeFailure": warning.timestamp < failure.occurred_at,
+        "firstWarningAt": warning.timestamp.isoformat(),
+        "warningMileage": round(warning.mileage, 1),
+        "leadMiles": round(lead_miles, 1),
+        "leadSeconds": round(lead_seconds, 2),
+        "leadSimulatedHours": round(simulated_hours, 2),
+        "leadSimulatedDays": round(simulated_hours / 24.0, 3),
+    }
+
+
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "fleetmind-api"}
+    return {"status": "ok", "service": "fleetmind-api", "version": "0.2.0"}
 
 
 @app.get("/api/v1/fleet/summary")
 def fleet_summary(db: Session = Depends(db_session)) -> dict:
     since = datetime.now(timezone.utc) - timedelta(minutes=15)
     latest = (
-        select(
-            Telemetry.vehicle_id,
-            func.max(Telemetry.id).label("max_id"),
-        )
+        select(Telemetry.vehicle_id, func.max(Telemetry.id).label("max_id"))
         .where(Telemetry.timestamp >= since)
         .group_by(Telemetry.vehicle_id)
         .subquery()
@@ -59,16 +111,12 @@ def fleet_summary(db: Session = Depends(db_session)) -> dict:
         counts[row.status] = counts.get(row.status, 0) + 1
         risk_total += row.risk_score
 
-    active_alerts = db.scalar(
-        select(func.count(Alert.id)).where(Alert.created_at >= since)
-    ) or 0
+    active_alerts = db.scalar(select(func.count(Alert.id)).where(Alert.created_at >= since)) or 0
     critical_alerts = db.scalar(
-        select(func.count(Alert.id)).where(
-            Alert.created_at >= since,
-            Alert.severity == "critical",
-        )
+        select(func.count(Alert.id)).where(Alert.created_at >= since, Alert.severity == "critical")
     ) or 0
     telemetry_events = db.scalar(select(func.count(Telemetry.id))) or 0
+    failures = db.scalar(select(func.count(FailureEvent.id))) or 0
 
     total = len(rows)
     return {
@@ -76,6 +124,7 @@ def fleet_summary(db: Session = Depends(db_session)) -> dict:
         "telemetryEvents": telemetry_events,
         "activeAlerts": active_alerts,
         "criticalAlerts": critical_alerts,
+        "observedFailures": failures,
         "averageRisk": round(risk_total / total, 4) if total else 0.0,
         "health": counts,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
@@ -83,13 +132,8 @@ def fleet_summary(db: Session = Depends(db_session)) -> dict:
 
 
 @app.get("/api/v1/alerts")
-def alerts(
-    limit: int = Query(default=20, ge=1, le=200),
-    db: Session = Depends(db_session),
-) -> list[dict]:
-    rows = db.execute(
-        select(Alert).order_by(desc(Alert.created_at)).limit(limit)
-    ).scalars().all()
+def alerts(limit: int = Query(default=20, ge=1, le=200), db: Session = Depends(db_session)) -> list[dict]:
+    rows = db.execute(select(Alert).order_by(desc(Alert.created_at)).limit(limit)).scalars().all()
     return [
         {
             "id": row.id,
@@ -126,6 +170,10 @@ def vehicle(vehicle_id: str, db: Session = Depends(db_session)) -> dict:
     ).scalars().all()
     history.reverse()
 
+    failure = db.execute(
+        select(FailureEvent).where(FailureEvent.vehicle_id == vehicle_id)
+    ).scalar_one_or_none()
+
     return {
         "vehicleId": latest.vehicle_id,
         "model": latest.model,
@@ -135,6 +183,18 @@ def vehicle(vehicle_id: str, db: Session = Depends(db_session)) -> dict:
         "mileage": latest.mileage,
         "status": latest.status,
         "riskScore": latest.risk_score,
+        "failure": (
+            {
+                "occurredAt": failure.occurred_at.isoformat(),
+                "mileage": failure.failure_mileage,
+                "component": failure.component,
+                "failureMode": failure.failure_mode,
+                "faultCode": failure.fault_code,
+                "warning": warning_metrics(db, failure),
+            }
+            if failure
+            else None
+        ),
         "latest": {
             "timestamp": latest.timestamp.isoformat(),
             "batteryTempC": latest.battery_temp_c,
@@ -146,7 +206,9 @@ def vehicle(vehicle_id: str, db: Session = Depends(db_session)) -> dict:
         "history": [
             {
                 "timestamp": h.timestamp.isoformat(),
+                "mileage": h.mileage,
                 "riskScore": h.risk_score,
+                "status": h.status,
                 "batteryTempC": h.battery_temp_c,
                 "pumpCurrentA": h.pump_current_a,
                 "pumpRPM": h.pump_rpm,
@@ -174,4 +236,107 @@ def pump_revision_cohorts(db: Session = Depends(db_session)) -> list[dict]:
             "averagePumpCurrentA": round(float(avg_current or 0), 3),
         }
         for revision, samples, avg_risk, avg_current in rows
+    ]
+
+
+@app.get("/api/v1/reliability/pump-revisions")
+def pump_reliability(db: Session = Depends(db_session)) -> list[dict]:
+    latest_rows = latest_vehicle_rows(db)
+    failures = db.execute(select(FailureEvent)).scalars().all()
+    failures_by_vehicle = {f.vehicle_id: f for f in failures}
+
+    cohorts: dict[str, list[Telemetry]] = defaultdict(list)
+    for row in latest_rows:
+        cohorts[row.pump_revision].append(row)
+
+    response: list[dict] = []
+    for revision in sorted(cohorts):
+        vehicle_rows = cohorts[revision]
+        observations: list[ReliabilityObservation] = []
+        cohort_failures: list[FailureEvent] = []
+
+        for row in vehicle_rows:
+            failure = failures_by_vehicle.get(row.vehicle_id)
+            if failure is not None:
+                observations.append(ReliabilityObservation(failure.failure_mileage, True))
+                cohort_failures.append(failure)
+            else:
+                observations.append(ReliabilityObservation(row.mileage, False))
+
+        fit = fit_weibull_right_censored(observations)
+        warning_rows = [warning_metrics(db, failure) for failure in cohort_failures]
+        detected = [w for w in warning_rows if w["detectedBeforeFailure"]]
+        lead_miles = [float(w["leadMiles"]) for w in detected if w["leadMiles"] is not None]
+        lead_seconds = [float(w["leadSeconds"]) for w in detected if w["leadSeconds"] is not None]
+        lead_sim_days = [float(w["leadSimulatedDays"]) for w in detected if w["leadSimulatedDays"] is not None]
+
+        km = kaplan_meier(observations)
+        # Keep API payload compact for large fleets while preserving curve shape.
+        if len(km) > 80:
+            stride = max(1, len(km) // 79)
+            sampled = km[::stride]
+            if sampled[-1] != km[-1]:
+                sampled.append(km[-1])
+            km = sampled
+
+        weibull = None
+        if fit is not None:
+            weibull = {
+                "beta": round(fit.beta, 4),
+                "etaMiles": round(fit.eta, 1),
+                "b10Miles": round(fit.b10, 1),
+                "b50Miles": round(fit.b50, 1),
+                "failureBehavior": fit.failure_behavior,
+                "reliability": {
+                    str(miles): round(fit.reliability(float(miles)), 6)
+                    for miles in (25000, 50000, 75000, 100000)
+                },
+            }
+
+        response.append(
+            {
+                "pumpRevision": revision,
+                "population": len(vehicle_rows),
+                "failures": len(cohort_failures),
+                "censored": len(vehicle_rows) - len(cohort_failures),
+                "failureRate": round(len(cohort_failures) / len(vehicle_rows), 6) if vehicle_rows else 0.0,
+                "weibull": weibull,
+                "earlyWarning": {
+                    "failuresEvaluated": len(cohort_failures),
+                    "detectedBeforeFailure": len(detected),
+                    "detectionRate": round(len(detected) / len(cohort_failures), 6) if cohort_failures else None,
+                    "medianLeadMiles": round(median_or_none(lead_miles), 1) if lead_miles else None,
+                    "medianLeadSeconds": round(median_or_none(lead_seconds), 2) if lead_seconds else None,
+                    "medianLeadSimulatedDays": round(median_or_none(lead_sim_days), 3) if lead_sim_days else None,
+                },
+                "kaplanMeier": km,
+            }
+        )
+
+    return response
+
+
+@app.get("/api/v1/reliability/failures")
+def reliability_failures(
+    limit: int = Query(default=50, ge=1, le=500),
+    db: Session = Depends(db_session),
+) -> list[dict]:
+    rows = db.execute(
+        select(FailureEvent).order_by(desc(FailureEvent.occurred_at)).limit(limit)
+    ).scalars().all()
+    return [
+        {
+            "vehicleId": row.vehicle_id,
+            "occurredAt": row.occurred_at.isoformat(),
+            "failureMileage": row.failure_mileage,
+            "component": row.component,
+            "failureMode": row.failure_mode,
+            "faultCode": row.fault_code,
+            "model": row.model,
+            "factory": row.factory,
+            "firmware": row.firmware,
+            "pumpRevision": row.pump_revision,
+            "warning": warning_metrics(db, row),
+        }
+        for row in rows
     ]

@@ -6,3 +6,4 @@ DATABASE_URL = os.getenv(
 )
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
 TELEMETRY_TOPIC = os.getenv("TELEMETRY_TOPIC", "vehicle.telemetry.v1")
+FAILURE_TOPIC = os.getenv("FAILURE_TOPIC", "vehicle.failure-events.v1")

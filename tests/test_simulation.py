@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT / "services" / "common"))
 sys.path.insert(0, str(ROOT / "services" / "simulator"))
 
 from fleetmind_common.risk import score_telemetry
-from app.sim import Vehicle, sample
+from app.sim import Vehicle, sample, sample_step
 
 
 class SimulationTests(unittest.TestCase):
@@ -28,6 +28,21 @@ class SimulationTests(unittest.TestCase):
         self.assertGreater(degraded_risk.score, healthy_risk.score)
         self.assertGreater(degraded_event["thermal"]["pumpCurrentA"], healthy_event["thermal"]["pumpCurrentA"])
         self.assertLess(degraded_event["thermal"]["pumpRPM"], healthy_event["thermal"]["pumpRPM"])
+
+    def test_failure_truth_is_separate_from_telemetry(self):
+        vehicle = Vehicle(
+            "EV-F", "SY", "Austin", "2026.32.4", "CP-17", 60000, 0.3, 38, 1.0,
+            failure_threshold=0.90,
+        )
+        step = sample_step(vehicle, 18000, 500, 120, random.Random(8))
+        self.assertIsNotNone(step.failure_event)
+        self.assertNotIn("eventType", step.telemetry)
+        self.assertNotIn("failureMode", step.telemetry)
+        self.assertNotIn("failed", step.telemetry)
+        self.assertEqual(step.failure_event["eventType"], "component_failure")
+
+        second = sample_step(vehicle, 18120, 500, 120, random.Random(9))
+        self.assertIsNone(second.failure_event)
 
 
 if __name__ == "__main__":

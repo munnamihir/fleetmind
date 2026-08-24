@@ -49,3 +49,20 @@ class Alert(Base):
     firmware: Mapped[str] = mapped_column(String(32), index=True)
     pump_revision: Mapped[str] = mapped_column(String(32), index=True)
     factory: Mapped[str] = mapped_column(String(32), index=True)
+
+
+class FailureEvent(Base):
+    __tablename__ = "failure_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    vehicle_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    model: Mapped[str] = mapped_column(String(32))
+    factory: Mapped[str] = mapped_column(String(32), index=True)
+    firmware: Mapped[str] = mapped_column(String(32), index=True)
+    component: Mapped[str] = mapped_column(String(64), index=True)
+    failure_mode: Mapped[str] = mapped_column(String(128), index=True)
+    pump_revision: Mapped[str] = mapped_column(String(32), index=True)
+    failure_mileage: Mapped[float] = mapped_column(Float, index=True)
+    fault_code: Mapped[str] = mapped_column(String(32))
+    simulation_time_acceleration: Mapped[float] = mapped_column(Float, default=600.0)

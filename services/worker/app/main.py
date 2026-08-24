@@ -6,16 +6,16 @@ import time
 from datetime import datetime, timezone
 
 from confluent_kafka import Consumer, KafkaError
+from sqlalchemy import select
 
-from fleetmind_common.config import KAFKA_BOOTSTRAP_SERVERS, TELEMETRY_TOPIC
+from fleetmind_common.config import FAILURE_TOPIC, KAFKA_BOOTSTRAP_SERVERS, TELEMETRY_TOPIC
 from fleetmind_common.db import Base, SessionLocal, engine
-from fleetmind_common.models import Alert, Telemetry
+from fleetmind_common.models import Alert, FailureEvent, Telemetry
 from fleetmind_common.risk import score_telemetry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("fleetmind-worker")
 
-# Avoid alert spam while preserving a visible incident stream.
 last_alert_at: dict[str, float] = {}
 ALERT_COOLDOWN_SECONDS = 25
 
@@ -31,7 +31,7 @@ def wait_for_db() -> None:
     raise RuntimeError("database unavailable")
 
 
-def persist(event: dict) -> None:
+def persist_telemetry(event: dict) -> None:
     risk = score_telemetry(event)
     battery = event["battery"]
     powertrain = event["powertrain"]
@@ -90,18 +90,58 @@ def persist(event: dict) -> None:
         db.commit()
 
 
+def persist_failure(event: dict) -> None:
+    vehicle = event["vehicle"]
+    ts = datetime.fromisoformat(event["timestamp"].replace("Z", "+00:00"))
+
+    with SessionLocal() as db:
+        existing = db.execute(
+            select(FailureEvent).where(FailureEvent.vehicle_id == vehicle["id"])
+        ).scalar_one_or_none()
+        if existing is not None:
+            return
+
+        db.add(
+            FailureEvent(
+                occurred_at=ts,
+                vehicle_id=vehicle["id"],
+                model=vehicle["model"],
+                factory=vehicle["factory"],
+                firmware=vehicle["firmware"],
+                component=event["component"],
+                failure_mode=event["failureMode"],
+                pump_revision=vehicle["pumpRevision"],
+                failure_mileage=float(vehicle["mileage"]),
+                fault_code=event["faultCode"],
+                simulation_time_acceleration=float(event.get("simulationTimeAcceleration", 600.0)),
+            )
+        )
+        db.commit()
+        log.info(
+            "recorded failure %s %s at %.1f mi",
+            vehicle["id"],
+            vehicle["pumpRevision"],
+            float(vehicle["mileage"]),
+        )
+
+
 def main() -> None:
     wait_for_db()
     consumer = Consumer(
         {
             "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
-            "group.id": "fleetmind-anomaly-worker-v1",
-            "auto.offset.reset": "latest",
+            "group.id": "fleetmind-reliability-worker-v2",
+            "auto.offset.reset": "earliest",
             "enable.auto.commit": True,
         }
     )
-    consumer.subscribe([TELEMETRY_TOPIC])
-    log.info("consuming %s from %s", TELEMETRY_TOPIC, KAFKA_BOOTSTRAP_SERVERS)
+    consumer.subscribe([TELEMETRY_TOPIC, FAILURE_TOPIC])
+    log.info(
+        "consuming telemetry=%s failure_truth=%s from %s",
+        TELEMETRY_TOPIC,
+        FAILURE_TOPIC,
+        KAFKA_BOOTSTRAP_SERVERS,
+    )
 
     try:
         while True:
@@ -113,9 +153,13 @@ def main() -> None:
                     log.error("kafka error: %s", msg.error())
                 continue
             try:
-                persist(json.loads(msg.value().decode("utf-8")))
+                event = json.loads(msg.value().decode("utf-8"))
+                if msg.topic() == FAILURE_TOPIC or event.get("eventType") == "component_failure":
+                    persist_failure(event)
+                else:
+                    persist_telemetry(event)
             except Exception:
-                log.exception("failed to process telemetry message")
+                log.exception("failed to process message from %s", msg.topic())
     finally:
         consumer.close()
 

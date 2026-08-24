@@ -50,7 +50,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "rpk cluster info --brokers localhost:9092 >/dev/null 2>&1 || exit 1"
+          "rpk topic list --brokers localhost:9092 >/dev/null 2>&1 || exit 1"
         ]
       interval: 5s
       timeout: 5s
@@ -70,19 +70,33 @@ services:
 
     command:
       - |
-        echo "Ensuring Kafka topic exists..."
+        set -e
 
-        rpk topic create "${TELEMETRY_TOPIC:-vehicle.telemetry.v1}" \
+        echo "Ensuring FleetMind Kafka topics exist..."
+
+        rpk topic create "$${TELEMETRY_TOPIC}" \
           --partitions 3 \
           --replicas 1 \
           --brokers redpanda:9092 \
-        || rpk topic describe "${TELEMETRY_TOPIC:-vehicle.telemetry.v1}" \
+          2>/dev/null || true
+
+        rpk topic create "$${FAILURE_TOPIC}" \
+          --partitions 3 \
+          --replicas 1 \
+          --brokers redpanda:9092 \
+          2>/dev/null || true
+
+        rpk topic describe "$${TELEMETRY_TOPIC}" \
           --brokers redpanda:9092 >/dev/null
 
-        echo "Kafka topic ready."
+        rpk topic describe "$${FAILURE_TOPIC}" \
+          --brokers redpanda:9092 >/dev/null
+
+        echo "FleetMind Kafka topics ready."
 
     environment:
       TELEMETRY_TOPIC: ${TELEMETRY_TOPIC:-vehicle.telemetry.v1}
+      FAILURE_TOPIC: ${FAILURE_TOPIC:-vehicle.failure-events.v1}
 
     restart: "no"
 
@@ -108,8 +122,13 @@ services:
 
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fleetmind:fleetmind@postgres:5432/fleetmind}
+
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+
       TELEMETRY_TOPIC: ${TELEMETRY_TOPIC:-vehicle.telemetry.v1}
+
+      FAILURE_TOPIC: ${FAILURE_TOPIC:-vehicle.failure-events.v1}
+
       PYTHONUNBUFFERED: "1"
 
     depends_on:
@@ -129,9 +148,17 @@ services:
 
     environment:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+
       TELEMETRY_TOPIC: ${TELEMETRY_TOPIC:-vehicle.telemetry.v1}
+
+      FAILURE_TOPIC: ${FAILURE_TOPIC:-vehicle.failure-events.v1}
+
       SIMULATED_VEHICLES: ${SIMULATED_VEHICLES:-500}
+
       SIM_EVENTS_PER_SECOND: ${SIM_EVENTS_PER_SECOND:-120}
+
+      SIM_TIME_ACCELERATION: ${SIM_TIME_ACCELERATION:-600}
+
       PYTHONUNBUFFERED: "1"
 
     depends_on:
@@ -154,6 +181,7 @@ services:
 
     depends_on:
       - api
+
 
 volumes:
   fleetmind-postgres:

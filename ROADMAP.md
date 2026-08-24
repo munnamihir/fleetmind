@@ -14,12 +14,13 @@
 
 ## Milestone 2 — Reliability Science
 
-- [ ] Failure/event ground-truth side channel for offline evaluation only
-- [ ] Weibull shape/scale estimation by component cohort
-- [ ] Kaplan-Meier survival curves
+- [x] Failure/event ground-truth side channel for offline evaluation only
+- [x] Weibull shape/scale estimation by component cohort
+- [x] Kaplan-Meier survival curves
 - [ ] Mean/median remaining useful life
-- [ ] Early-warning lead-time metric
+- [x] Early-warning lead-time metric
 - [ ] False-positive and missed-failure evaluation
+- [x] Reliability engineering dashboard
 
 ## Milestone 3 — Firmware Regression Lab
 
