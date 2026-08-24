@@ -3,6 +3,7 @@ import {
   Activity,
   AlertTriangle,
   Binary,
+  BrainCircuit,
   ChevronRight,
   Cpu,
   Gauge,
@@ -18,7 +19,7 @@ import {
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
-type Page = 'fleet' | 'reliability' | 'firmware';
+type Page = 'fleet' | 'reliability' | 'firmware' | 'ml';
 
 type Summary = {
   vehiclesMonitored: number;
@@ -178,6 +179,99 @@ type FirmwareRegression = {
   };
 };
 
+type MLMetrics = {
+  rocAuc?: number | null;
+  prAuc?: number | null;
+  precision?: number;
+  recall?: number;
+  f1?: number;
+  brierScore?: number;
+  positiveRate?: number;
+  threshold?: number;
+  thresholdPolicy?: string;
+  confusionMatrix?: { tn: number; fp: number; fn: number; tp: number };
+  earlyWarning?: {
+    failureVehiclesEvaluated: number;
+    failureVehiclesDetected: number;
+    vehicleDetectionRate: number | null;
+    medianLeadMiles: number | null;
+  };
+  calibration?: { method: string; coefficient: number; intercept: number };
+};
+
+type BenchmarkQualification = {
+  status: 'qualified' | 'insufficient_evidence';
+  requirements: { examples: number; positiveWindows: number; failureVehicles: number; bothClassesPresent: boolean };
+  observed: { examples: number; positives: number; vehicles: number; failureVehicles: number; bothClassesPresent: boolean };
+  reasons: string[];
+  claimPolicy: string;
+};
+
+type MLStatus = {
+  runId?: number;
+  createdAt?: string;
+  completedAt?: string | null;
+  status: string;
+  algorithm?: string;
+  horizonMiles?: number;
+  windowSize?: number;
+  dataset?: {
+    train: { examples: number; positives: number };
+    validation: { examples: number; positives: number };
+    benchmark?: { examples: number; positives: number };
+    test: { examples: number; positives: number };
+  };
+  decisionThreshold?: number | null;
+  metrics?: MLMetrics;
+  benchmarkQualification?: BenchmarkQualification | null;
+  baseline?: (MLMetrics & { algorithm?: string }) | null;
+  modelDeltaVsBaseline?: {
+    rocAuc?: number | null;
+    prAuc?: number | null;
+    precision?: number | null;
+    recall?: number | null;
+    f1?: number | null;
+    brierImprovement?: number | null;
+  } | null;
+  benchmarkProtocol?: Record<string, unknown> | null;
+  operationalScoring?: Record<string, unknown> | null;
+  calibration?: Array<{ lower: number; upper: number; count: number; meanPrediction: number; observedRate: number }>;
+  featureImportance?: Array<{ feature: string; importance: number }>;
+  leakagePolicy?: Record<string, unknown>;
+  notes?: string;
+  message?: string;
+};
+
+type MLPrediction = {
+  modelRunId: number;
+  generatedAt: string;
+  vehicleId: string;
+  probability: number;
+  predictedFailureWithinHorizon: boolean;
+  anchorMileage: number;
+  firmware: string;
+  pumpRevision: string;
+  factory: string;
+  model: string;
+  featureSummary: Record<string, number>;
+  horizonMiles: number;
+  decisionThreshold: number | null;
+};
+
+type MLPredictionHistory = {
+  vehicleId: string;
+  points: Array<{
+    modelRunId: number;
+    generatedAt: string;
+    anchorMileage: number;
+    probability: number;
+    decisionThreshold: number | null;
+    predictedFailureWithinHorizon: boolean;
+    firmware: string;
+    pumpRevision: string;
+  }>;
+};
+
 const emptySummary: Summary = {
   vehiclesMonitored: 0,
   telemetryEvents: 0,
@@ -218,13 +312,15 @@ export function App() {
   const [failures, setFailures] = useState<FailureRow[]>([]);
   const [firmwareOverview, setFirmwareOverview] = useState<FirmwareOverviewRow[]>([]);
   const [firmwareRegression, setFirmwareRegression] = useState<FirmwareRegression | null>(null);
+  const [mlStatus, setMlStatus] = useState<MLStatus>({ status: 'waiting_for_trainer' });
+  const [mlPredictions, setMlPredictions] = useState<MLPrediction[]>([]);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     let alive = true;
     async function refresh() {
       try {
-        const [s, a, c, r, f, fo, fr] = await Promise.all([
+        const [s, a, c, r, f, fo, fr, ms, mp] = await Promise.all([
           fetch(`${API}/api/v1/fleet/summary`).then(response => response.json()),
           fetch(`${API}/api/v1/alerts?limit=10`).then(response => response.json()),
           fetch(`${API}/api/v1/cohorts/pump-revisions`).then(response => response.json()),
@@ -232,6 +328,8 @@ export function App() {
           fetch(`${API}/api/v1/reliability/failures?limit=12`).then(response => response.json()),
           fetch(`${API}/api/v1/firmware/overview`).then(response => response.json()),
           fetch(`${API}/api/v1/firmware/regression?target=2026.32.4&control=2026.32.1`).then(response => response.json()),
+          fetch(`${API}/api/v1/ml/status`).then(response => response.json()),
+          fetch(`${API}/api/v1/ml/predictions?limit=20`).then(response => response.json()),
         ]);
         if (alive) {
           setSummary(s);
@@ -241,6 +339,8 @@ export function App() {
           setFailures(f);
           setFirmwareOverview(fo);
           setFirmwareRegression(fr);
+          setMlStatus(ms);
+          setMlPredictions(mp);
           setConnected(true);
         }
       } catch {
@@ -289,6 +389,7 @@ export function App() {
           <button><Binary size={17} /> Cohorts</button>
           <button><Cpu size={17} /> Components</button>
           <button className={page === 'firmware' ? 'navActive' : ''} onClick={() => setPage('firmware')}><Zap size={17} /> Firmware</button>
+          <button className={page === 'ml' ? 'navActive' : ''} onClick={() => setPage('ml')}><BrainCircuit size={17} /> Predictive ML</button>
         </nav>
         <div className="sidebarFoot">
           <Radio size={15} />
@@ -311,11 +412,13 @@ export function App() {
             failures={failures}
             observedFailures={summary.observedFailures}
           />
-        ) : (
+        ) : page === 'firmware' ? (
           <FirmwareDashboard
             overview={firmwareOverview}
             regression={firmwareRegression}
           />
+        ) : (
+          <MLDashboard status={mlStatus} predictions={mlPredictions} />
         )}
       </main>
     </div>
@@ -327,14 +430,22 @@ function Header({ connected, page }: { connected: boolean; page: Page }) {
     <header>
       <div>
         <p className="eyebrow">
-          {page === 'fleet' ? 'GLOBAL FLEET INTELLIGENCE' : page === 'reliability' ? 'RELIABILITY SCIENCE / COOLANT PUMP' : 'FIRMWARE REGRESSION LAB / MATCHED COHORTS'}
+          {page === 'fleet'
+            ? 'GLOBAL FLEET INTELLIGENCE'
+            : page === 'reliability'
+              ? 'RELIABILITY SCIENCE / COOLANT PUMP'
+              : page === 'firmware'
+                ? 'FIRMWARE REGRESSION LAB / MATCHED COHORTS'
+                : 'PREDICTIVE MAINTENANCE ML / FORWARD FAILURE HORIZON'}
         </p>
         <h1>
           {page === 'fleet'
             ? 'Machine health, before the fault code.'
             : page === 'reliability'
               ? 'Field reliability, quantified from observed life.'
-              : 'Did the software change the failure rate?'}
+              : page === 'firmware'
+                ? 'Did the software change the failure rate?'
+                : 'Predict the failure before the fault code exists.'}
         </h1>
       </div>
       <div className={`live ${connected ? 'on' : ''}`}>
@@ -701,6 +812,261 @@ function FirmwareDashboard({
         ))}
       </section>
     </>
+  );
+}
+
+
+function MLDashboard({ status, predictions }: { status: MLStatus; predictions: MLPrediction[] }) {
+  const metrics = status.metrics;
+  const complete = status.status === 'complete' && metrics != null;
+  const importance = status.featureImportance ?? [];
+  const calibration = status.calibration ?? [];
+  const cm = metrics?.confusionMatrix;
+  const warning = metrics?.earlyWarning;
+  const qualification = status.benchmarkQualification;
+  const baseline = status.baseline;
+  const delta = status.modelDeltaVsBaseline;
+  const qualified = qualification?.status === 'qualified';
+  const maxImportance = Math.max(0.000001, ...importance.map(item => item.importance));
+  const [selectedVehicle, setSelectedVehicle] = useState('');
+  const [history, setHistory] = useState<MLPredictionHistory | null>(null);
+
+  useEffect(() => {
+    if (!selectedVehicle && predictions.length > 0) setSelectedVehicle(predictions[0].vehicleId);
+  }, [predictions, selectedVehicle]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!selectedVehicle) {
+      setHistory(null);
+      return () => { alive = false; };
+    }
+    fetch(`${API}/api/v1/ml/vehicles/${encodeURIComponent(selectedVehicle)}/history?limit=80`)
+      .then(response => response.ok ? response.json() : Promise.reject())
+      .then(value => { if (alive) setHistory(value); })
+      .catch(() => { if (alive) setHistory(null); });
+    return () => { alive = false; };
+  }, [selectedVehicle, status.runId]);
+
+  return (
+    <>
+      <section className="metrics mlMetrics">
+        <Metric icon={<BrainCircuit />} label="Model state" value={statusLabel(status.status)} detail={status.algorithm ?? status.message ?? 'trainer warming up'} />
+        <Metric icon={<ShieldCheck />} label="Benchmark" value={qualification == null ? 'LEGACY RUN' : qualified ? 'QUALIFIED' : 'EVIDENCE GATE'} detail={qualification == null ? 'waiting for Phase 5.1 run' : qualified ? 'frozen benchmark meets claim policy' : `${qualification.observed.failureVehicles}/${qualification.requirements.failureVehicles} failure vehicles`} />
+        <Metric icon={<TrendingDown />} label="PR-AUC" value={metrics?.prAuc == null ? '—' : metrics.prAuc.toFixed(3)} detail={`frozen benchmark · base ${formatPct(metrics?.positiveRate)}`} />
+        <Metric icon={<TimerReset />} label="ML warning lead" value={formatMiles(warning?.medianLeadMiles)} detail={warning?.failureVehiclesEvaluated == null ? 'awaiting benchmark failures' : `${warning.failureVehiclesDetected}/${warning.failureVehiclesEvaluated} failure vehicles detected`} />
+      </section>
+
+      {!complete ? (
+        <section className="panel mlWaitingPanel">
+          <BrainCircuit size={34} />
+          <strong>{status.status === 'insufficient_data' ? 'Collecting a defensible ML evaluation set' : 'Waiting for the ML trainer'}</strong>
+          <p>{status.notes || status.message || 'FleetMind will train automatically after enough causal telemetry windows and validation evidence exist.'}</p>
+          {status.dataset && <DatasetStrip dataset={status.dataset} />}
+        </section>
+      ) : (
+        <>
+          <section className="mlHeroGrid">
+            <article className="panel mlEvaluationPanel">
+              <div className="panelTitleRow">
+                <PanelTitle kicker="FROZEN BENCHMARK" title={`Failure within next ${formatMiles(status.horizonMiles)}`} />
+                <span className="methodBadge">XGBoost · sensor-only · immutable vehicle cohort</span>
+              </div>
+              <DatasetStrip dataset={status.dataset!} />
+              <div className="mlScoreGrid">
+                <Parameter label="ROC-AUC" value={metrics?.rocAuc == null ? '—' : metrics.rocAuc.toFixed(3)} note="frozen benchmark" />
+                <Parameter label="Precision" value={formatPct(metrics?.precision)} note="frozen benchmark" />
+                <Parameter label="Recall" value={formatPct(metrics?.recall)} note="frozen benchmark" />
+                <Parameter label="Brier score" value={metrics?.brierScore == null ? '—' : metrics.brierScore.toFixed(4)} note="probability error · lower is better" />
+              </div>
+              <div className="mlProtocolNote">
+                <ShieldCheck size={17} />
+                <div>
+                  <b>Benchmark cannot leak back into development</b>
+                  <span>Vehicle membership is determined only by a fixed SHA-256 vehicle-ID hash. Benchmark vehicles are excluded from fit, Platt calibration and threshold selection. Risk score, status, alerts, fault codes, firmware, pump revision and failure truth are excluded from fitted model inputs.</span>
+                </div>
+              </div>
+              <div className="thresholdLine"><span>Operational threshold</span><b>{status.decisionThreshold == null ? '—' : status.decisionThreshold.toFixed(4)}</b><small>{metrics?.thresholdPolicy}</small></div>
+            </article>
+
+            <article className={`panel qualificationPanel ${qualified ? 'qualifiedPanel' : ''}`}>
+              <PanelTitle kicker="CLAIM POLICY" title={qualified ? 'Benchmark qualified' : 'Insufficient benchmark evidence'} />
+              {qualification ? (
+                <>
+                  <div className={`qualificationBadge ${qualified ? 'qualificationGood' : ''}`}>{qualified ? 'PUBLISHABLE BENCHMARK' : 'DO NOT PUBLISH HEADLINE METRICS'}</div>
+                  <div className="qualificationRows">
+                    <QualificationRow label="Benchmark windows" observed={qualification.observed.examples} required={qualification.requirements.examples} />
+                    <QualificationRow label="Positive windows" observed={qualification.observed.positives} required={qualification.requirements.positiveWindows} />
+                    <QualificationRow label="Failure vehicles" observed={qualification.observed.failureVehicles} required={qualification.requirements.failureVehicles} />
+                  </div>
+                  {qualification.reasons.length > 0 && <div className="qualificationReasons">{qualification.reasons.map(reason => <span key={reason}>• {reason}</span>)}</div>}
+                  <p className="muted">Operational predictions continue even when the benchmark evidence gate is not yet satisfied.</p>
+                </>
+              ) : <div className="empty">The next Phase 5.1 training run will create a frozen benchmark qualification record.</div>}
+            </article>
+          </section>
+
+          <section className="grid mlLower benchmarkComparisonGrid">
+            <article className="panel baselinePanel">
+              <PanelTitle kicker="MODEL SELECTION" title="XGBoost vs simple baseline" />
+              <div className="baselineTable">
+                <div className="baselineHead"><span>Metric</span><span>Logistic</span><span>XGBoost</span><span>Δ</span></div>
+                <BaselineRow label="PR-AUC" baseline={baseline?.prAuc} model={metrics?.prAuc} delta={delta?.prAuc} />
+                <BaselineRow label="ROC-AUC" baseline={baseline?.rocAuc} model={metrics?.rocAuc} delta={delta?.rocAuc} />
+                <BaselineRow label="Recall" baseline={baseline?.recall} model={metrics?.recall} delta={delta?.recall} percent />
+                <BaselineRow label="Precision" baseline={baseline?.precision} model={metrics?.precision} delta={delta?.precision} percent />
+                <BaselineRow label="Brier" baseline={baseline?.brierScore} model={metrics?.brierScore} delta={delta?.brierImprovement} lowerBetter />
+              </div>
+              <p className="muted">Both models see the identical causal sensor windows and frozen benchmark. If logistic regression nearly matches XGBoost, FleetMind reports that rather than claiming complexity is automatically better.</p>
+            </article>
+
+            <article className="panel confusionPanel">
+              <PanelTitle kicker="FROZEN BENCHMARK" title="Confusion matrix" />
+              {cm ? (
+                <div className="confusionMatrix">
+                  <div className="matrixCorner" />
+                  <span className="matrixAxis">Pred healthy</span><span className="matrixAxis">Pred failure</span>
+                  <span className="matrixAxis rowAxis">Actual healthy</span><MatrixCell value={cm.tn} label="TN" /><MatrixCell value={cm.fp} label="FP" />
+                  <span className="matrixAxis rowAxis">Actual failure</span><MatrixCell value={cm.fn} label="FN" /><MatrixCell value={cm.tp} label="TP" hot />
+                </div>
+              ) : <div className="empty">Evaluation matrix not available yet.</div>}
+              <div className="warningStats mlWarningStats">
+                <Parameter label="Failure vehicles evaluated" value={String(warning?.failureVehiclesEvaluated ?? 0)} note="unique frozen-benchmark vehicles" />
+                <Parameter label="Detected before failure" value={String(warning?.failureVehiclesDetected ?? 0)} note={formatMiles(warning?.medianLeadMiles)} />
+              </div>
+            </article>
+          </section>
+
+          <section className="grid mlLower">
+            <article className="panel featurePanel">
+              <PanelTitle kicker="MODEL EXPLAINABILITY" title="Top predictive signals" />
+              <div className="importanceList">
+                {importance.slice(0, 10).map(item => (
+                  <div className="importanceRow" key={item.feature}>
+                    <span>{humanize(item.feature.replaceAll('__', ' '))}</span>
+                    <div><i style={{ width: `${(item.importance / maxImportance) * 100}%` }} /></div>
+                    <b>{(item.importance * 100).toFixed(1)}%</b>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <article className="panel calibrationPanel">
+              <PanelTitle kicker="PROBABILITY QUALITY" title="Frozen-benchmark calibration" />
+              <CalibrationChart bins={calibration} />
+              <p className="muted">Platt calibration is fitted on validation only; these dots are measured on the untouched benchmark.</p>
+            </article>
+          </section>
+
+          <section className="panel historyPanel">
+            <div className="panelTitleRow">
+              <PanelTitle kicker="LONGITUDINAL RISK" title={selectedVehicle ? `${selectedVehicle} prediction history` : 'Prediction history'} />
+              <span className="methodBadge">model-run history · operational scoring</span>
+            </div>
+            <PredictionHistoryChart history={history} />
+            <p className="muted">Historical predictions are retained intentionally. This view shows whether risk rises before failure instead of treating prior model-run rows as duplicates.</p>
+          </section>
+
+          <section className="panel predictionPanel">
+            <div className="panelTitleRow">
+              <PanelTitle kicker="OPERATIONAL SCORING" title="Highest future-failure probability" />
+              <span className="methodBadge">latest causal window / active vehicle</span>
+            </div>
+            <div className="predictionHead">
+              <span>Vehicle</span><span>Probability</span><span>Revision</span><span>Firmware</span><span>Mileage</span><span>Pump current</span><span>Pump-current slope</span>
+            </div>
+            {predictions.map(row => (
+              <div
+                className={`predictionRow predictionSelectable ${selectedVehicle === row.vehicleId ? 'predictionSelected' : ''}`}
+                key={`${row.modelRunId}-${row.vehicleId}`}
+                onClick={() => setSelectedVehicle(row.vehicleId)}
+                onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') setSelectedVehicle(row.vehicleId); }}
+                role="button"
+                tabIndex={0}
+              >
+                <b>{row.vehicleId}</b>
+                <strong className={row.predictedFailureWithinHorizon ? 'hot' : ''}>{formatPct(row.probability)}</strong>
+                <span>{row.pumpRevision}</span>
+                <span>{row.firmware}</span>
+                <span>{formatMiles(row.anchorMileage)}</span>
+                <span>{row.featureSummary.pump_current_a_last == null ? '—' : `${row.featureSummary.pump_current_a_last.toFixed(3)} A`}</span>
+                <span>{row.featureSummary.pump_current_a_slope_per_1k_mi == null ? '—' : `${row.featureSummary.pump_current_a_slope_per_1k_mi >= 0 ? '+' : ''}${row.featureSummary.pump_current_a_slope_per_1k_mi.toFixed(3)} A/1k mi`}</span>
+              </div>
+            ))}
+            {predictions.length === 0 && <div className="empty">The first live predictions will appear after a complete model run.</div>}
+          </section>
+        </>
+      )}
+    </>
+  );
+}
+
+function DatasetStrip({ dataset }: { dataset: NonNullable<MLStatus['dataset']> }) {
+  const benchmark = dataset.benchmark ?? dataset.test;
+  return (
+    <div className="datasetStrip">
+      <div><span>TRAIN</span><b>{formatNumber(dataset.train.examples)}</b><small>{dataset.train.positives} positive windows</small></div>
+      <div><span>VALIDATION</span><b>{formatNumber(dataset.validation.examples)}</b><small>{dataset.validation.positives} positive windows</small></div>
+      <div><span>FROZEN BENCHMARK</span><b>{formatNumber(benchmark.examples)}</b><small>{benchmark.positives} positive windows</small></div>
+    </div>
+  );
+}
+
+function QualificationRow({ label, observed, required }: { label: string; observed: number; required: number }) {
+  const pass = observed >= required;
+  return <div className="qualificationRow"><span>{label}</span><b className={pass ? 'qualificationPass' : ''}>{observed}</b><small>need ≥ {required}</small></div>;
+}
+
+function BaselineRow({ label, baseline, model, delta, percent = false, lowerBetter = false }: { label: string; baseline?: number | null; model?: number | null; delta?: number | null; percent?: boolean; lowerBetter?: boolean }) {
+  const fmt = (value?: number | null) => value == null ? '—' : percent ? formatPct(value) : value.toFixed(4);
+  const deltaText = delta == null ? '—' : `${delta >= 0 ? '+' : ''}${percent ? `${(delta * 100).toFixed(1)} pp` : delta.toFixed(4)}`;
+  return <div className="baselineRow"><span>{label}</span><span>{fmt(baseline)}</span><b>{fmt(model)}</b><strong className={delta != null && delta > 0 ? 'qualificationPass' : ''}>{deltaText}{lowerBetter && delta != null ? ' improvement' : ''}</strong></div>;
+}
+
+function PredictionHistoryChart({ history }: { history: MLPredictionHistory | null }) {
+  const width = 760;
+  const height = 240;
+  const padX = 44;
+  const padY = 28;
+  const points = history?.points ?? [];
+  if (points.length < 2) return <div className="empty historyEmpty">Prediction history will appear after this vehicle has been scored by at least two complete model runs.</div>;
+  const minMileage = Math.min(...points.map(point => point.anchorMileage));
+  const maxMileage = Math.max(...points.map(point => point.anchorMileage));
+  const mileageSpan = Math.max(1, maxMileage - minMileage);
+  const x = (mileage: number) => padX + ((mileage - minMileage) / mileageSpan) * (width - padX * 2);
+  const y = (probability: number) => height - padY - probability * (height - padY * 2);
+  const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${x(point.anchorMileage)} ${y(point.probability)}`).join(' ');
+  return (
+    <div className="historyChartWrap">
+      <svg viewBox={`0 0 ${width} ${height}`} className="historyChart" role="img" aria-label={`Prediction history for ${history?.vehicleId ?? 'vehicle'}`}>
+        {[0, .25, .5, .75, 1].map(value => <g key={value}><line x1={padX} y1={y(value)} x2={width - padX} y2={y(value)} className="chartGrid" /><text x={padX - 8} y={y(value) + 4} textAnchor="end" className="axisLabel">{value.toFixed(2)}</text></g>)}
+        <path d={path} className="historyPath" />
+        {points.map(point => <circle key={`${point.modelRunId}-${point.generatedAt}`} cx={x(point.anchorMileage)} cy={y(point.probability)} r={4} className={point.predictedFailureWithinHorizon ? 'historyDot historyDotHot' : 'historyDot'} />)}
+        <text x={padX} y={height - 7} className="axisLabel">{formatMiles(minMileage)}</text>
+        <text x={width - padX} y={height - 7} textAnchor="end" className="axisLabel">{formatMiles(maxMileage)}</text>
+      </svg>
+    </div>
+  );
+}
+
+function MatrixCell({ value, label, hot = false }: { value: number; label: string; hot?: boolean }) {
+  return <div className={`matrixCell ${hot ? 'matrixHot' : ''}`}><strong>{value}</strong><span>{label}</span></div>;
+}
+
+function CalibrationChart({ bins }: { bins: NonNullable<MLStatus['calibration']> }) {
+  const width = 360;
+  const height = 230;
+  const pad = 34;
+  const x = (value: number) => pad + value * (width - pad * 2);
+  const y = (value: number) => height - pad - value * (height - pad * 2);
+  return (
+    <div className="calibrationChartWrap">
+      <svg viewBox={`0 0 ${width} ${height}`} className="calibrationChart" role="img" aria-label="ML probability calibration chart">
+        <line x1={pad} y1={y(0)} x2={width - pad} y2={y(1)} className="calibrationIdeal" />
+        {[0, .25, .5, .75, 1].map(value => <g key={value}><line x1={x(value)} y1={pad} x2={x(value)} y2={height - pad} className="chartGrid" /><line x1={pad} y1={y(value)} x2={width - pad} y2={y(value)} className="chartGrid" /><text x={x(value)} y={height - 12} textAnchor="middle" className="axisLabel">{value.toFixed(2)}</text><text x={pad - 8} y={y(value) + 4} textAnchor="end" className="axisLabel">{value.toFixed(2)}</text></g>)}
+        {bins.map((bin, index) => <circle key={index} cx={x(bin.meanPrediction)} cy={y(bin.observedRate)} r={Math.min(9, 3 + Math.log10(bin.count + 1) * 2)} className="calibrationDot" />)}
+      </svg>
+    </div>
   );
 }
 
