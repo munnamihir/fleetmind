@@ -16,7 +16,7 @@
 
 - [ ] Failure/event ground-truth side channel for offline evaluation only
 - [ ] Weibull shape/scale estimation by component cohort
-- [ ] Kaplan-Meier survival curves
+- [x] Kaplan-Meier survival curves
 - [ ] Mean/median remaining useful life
 - [ ] Early-warning lead-time metric
 - [ ] False-positive and missed-failure evaluation

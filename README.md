@@ -24,7 +24,7 @@ eventual fault
 
 FleetMind must infer the problem from telemetry.
 
-## Phase 1
+## Current milestone: Phase 2 reliability science
 
 ```text
 Synthetic fleet ─► Redpanda/Kafka ─► Risk worker ─► PostgreSQL ─► FastAPI ─► React console
@@ -42,7 +42,12 @@ Synthetic fleet ─► Redpanda/Kafka ─► Risk worker ─► PostgreSQL ─�
 - Component cohort comparison
 - Vehicle telemetry history API
 - Dark engineering-focused dashboard
-- Docker Compose local environment
+- Docker Compose local environment with automatic Kafka topic initialization
+- Private ground-truth component failure stream for evaluation only
+- Right-censored two-parameter Weibull reliability fitting
+- B10/B50 and characteristic-life estimates
+- Kaplan-Meier survival curves
+- Early-warning detection rate and lead-time/mileage metrics
 
 ## Run
 
@@ -64,6 +69,7 @@ The default simulation produces 500 vehicles and ~120 telemetry events/sec. Chan
 ```text
 SIMULATED_VEHICLES=5000
 SIM_EVENTS_PER_SECOND=1000
+SIM_TIME_ACCELERATION=600
 ```
 
 ## Demo storyline
@@ -84,6 +90,8 @@ GET /api/v1/fleet/summary
 GET /api/v1/alerts?limit=20
 GET /api/v1/vehicles/{vehicle_id}
 GET /api/v1/cohorts/pump-revisions
+GET /api/v1/reliability/pump-revisions
+GET /api/v1/reliability/failures?limit=50
 ```
 
 ## Repository
@@ -121,9 +129,13 @@ The current risk model is intentionally transparent. It combines evidence from:
 
 This is a baseline, not the final ML model. The roadmap moves from explainable rules to evaluated classifiers, survival analysis and remaining-useful-life estimation while retaining evidence traces.
 
-## Next engineering milestone
+## Reliability science v0.2
 
-**Weibull + survival reliability engine.** FleetMind will estimate failure distributions for component cohorts, expose β/η, compute survival probability and measure how many simulated miles/hours before a fault the platform first detected degradation.
+The simulator publishes observable telemetry and private evaluation truth to separate Kafka topics. The worker stores the truth only in `failure_events`; it is never part of the telemetry contract used by the risk engine.
+
+For each pump revision, FleetMind treats failed vehicles as observed lifetimes and healthy vehicles as right-censored lifetimes. The API fits a two-parameter Weibull distribution, returns β/η/B10/B50, generates a Kaplan-Meier curve, and measures how far before failure the first degraded/critical telemetry signal appeared.
+
+`SIM_TIME_ACCELERATION=600` means one wall-clock second represents 600 seconds of accelerated fleet operation so useful field-life statistics emerge during a short local demo.
 
 See [ROADMAP.md](ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
