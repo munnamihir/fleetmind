@@ -83,13 +83,43 @@ eligible causal windows
         |
         +-- development train vehicles ---> model fit
         |
-        +-- development validation vehicles ---> calibration + threshold
+        +-- group-stratified development validation vehicles ---> calibration + threshold
         |
         `-- frozen benchmark vehicles ---> evaluation only
 ```
 
 Frozen benchmark membership is a deterministic SHA-256 bucket of `vehicle_id` with a fixed seed. It does not depend on labels, failure status, firmware, component revision, or model results, so a vehicle cannot migrate between development and benchmark as new failure truth arrives.
+Within the remaining development pool, validation selection is deterministic and group-stratified by causal failure support. This stratification is allowed only inside development data; benchmark membership remains label-agnostic and untouched. All windows from one vehicle stay in a single partition.
 
 Operational scoring is separate: after a complete run, the selected XGBoost model scores the latest causal window for every active vehicle. A benchmark can be marked `insufficient_evidence` while operational scoring continues. Headline benchmark claims require at least 1,000 benchmark windows, 20 positive windows, 8 distinct failure vehicles, and both outcome classes.
 
 Every run also fits a logistic-regression baseline using the identical sensor features and cohorts. XGBoost is therefore compared against a simple model instead of against no baseline. Historical live predictions are retained by model run and exposed as a per-vehicle longitudinal risk series.
+
+
+## Benchmark snapshot + lineage boundary (Phase 5.2)
+
+A frozen *vehicle cohort* is not yet an immutable benchmark dataset because new causal windows and newly observed failures can accumulate for those same vehicles. Phase 5.2 therefore introduces a second boundary:
+
+```text
+frozen benchmark vehicle IDs
+          |
+          v
+accumulating eligible causal windows
+          |
+          | evidence gate passes
+          v
+LOCKED BENCHMARK SNAPSHOT
+  - exact feature rows
+  - exact labels
+  - exact anchor timestamps/mileage
+  - SHA-256 data digest
+  - feature-schema SHA-256
+          |
+          v
+all later models in the same lineage
+are evaluated on the identical snapshot
+```
+
+A model lineage identifies a compatible feature/evaluation contract. Historical operational predictions are comparable only inside one lineage. The API therefore returns same-lineage history by default and additionally isolates the latest mileage-continuous experiment epoch. Simulator odometer resets create a new epoch; feature windows cannot cross the reset, and failure truth from a prior epoch is ignored.
+
+The locked snapshot is deliberately fail-closed. Missing/tampered artifacts or feature-schema drift stop benchmark evaluation and require an explicit lineage bump rather than silently changing the benchmark.

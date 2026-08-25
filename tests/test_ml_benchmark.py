@@ -64,6 +64,30 @@ class FrozenBenchmarkTests(unittest.TestCase):
         changed_ids = {row.vehicle_id for row in changed_split.benchmark}
         self.assertEqual(healthy_ids, changed_ids)
 
+    def test_development_validation_gets_failure_support_when_available(self):
+        rows = []
+        for vehicle_idx in range(1, 260):
+            vehicle_id = f"EV-{vehicle_idx:06d}"
+            for index in range(8):
+                rows.append(
+                    example(
+                        vehicle_id,
+                        index,
+                        label=1 if index == 6 and vehicle_idx % 5 == 0 else 0,
+                    )
+                )
+
+        split = split_examples_frozen_benchmark(rows)
+        train_failure_ids = {row.vehicle_id for row in split.train if row.label == 1}
+        validation_failure_ids = {row.vehicle_id for row in split.validation if row.label == 1}
+        benchmark_ids = {row.vehicle_id for row in split.benchmark}
+
+        self.assertTrue(train_failure_ids)
+        self.assertTrue(validation_failure_ids)
+        self.assertFalse(train_failure_ids & validation_failure_ids)
+        self.assertFalse(validation_failure_ids & benchmark_ids)
+        self.assertTrue(all(frozen_partition(vehicle_id) == "benchmark" for vehicle_id in benchmark_ids))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import DateTime, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
 
@@ -90,6 +90,29 @@ class MLModelRun(Base):
     feature_importance_json: Mapped[str] = mapped_column(Text, default="[]")
     leakage_policy_json: Mapped[str] = mapped_column(Text, default="{}")
     notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class MLBenchmarkSnapshot(Base):
+    __tablename__ = "ml_benchmark_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    lineage: Mapped[str] = mapped_column(String(64), index=True)
+    seed: Mapped[int] = mapped_column(Integer)
+    benchmark_fraction: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(32), default="locked", index=True)
+    example_count: Mapped[int] = mapped_column(Integer)
+    positive_count: Mapped[int] = mapped_column(Integer)
+    vehicle_count: Mapped[int] = mapped_column(Integer)
+    failure_vehicle_count: Mapped[int] = mapped_column(Integer)
+    feature_schema_sha256: Mapped[str] = mapped_column(String(64))
+    data_sha256: Mapped[str] = mapped_column(String(64))
+    artifact_path: Mapped[str] = mapped_column(Text)
+    manifest_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    __table_args__ = (
+        UniqueConstraint("lineage", "seed", name="uq_ml_benchmark_snapshot_lineage_seed"),
+    )
 
 
 class MLPrediction(Base):

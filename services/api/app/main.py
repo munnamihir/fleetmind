@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +19,7 @@ from fleetmind_common.reliability import (
     median_or_none,
 )
 
-app = FastAPI(title="FleetMind API", version="0.5.0")
+app = FastAPI(title="FleetMind API", version="0.6.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -440,6 +441,46 @@ def _json_or(value: str | None, fallback):
         return fallback
 
 
+DEFAULT_MODEL_LINEAGE = os.getenv("ML_MODEL_LINEAGE", "fm-ml-5.2-v1")
+
+
+def _run_lineage(run: MLModelRun) -> str:
+    metrics = _json_or(run.metrics_json, {})
+    policy = _json_or(run.leakage_policy_json, {})
+    return str(metrics.get("modelLineage") or policy.get("modelLineage") or "legacy")
+
+
+def _latest_run(db: Session) -> MLModelRun | None:
+    return db.execute(
+        select(MLModelRun)
+        .order_by(desc(MLModelRun.created_at), desc(MLModelRun.id))
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _active_model_lineage(db: Session) -> str:
+    latest = _latest_run(db)
+    if latest is None:
+        return DEFAULT_MODEL_LINEAGE
+    lineage = _run_lineage(latest)
+    return DEFAULT_MODEL_LINEAGE if lineage == "legacy" else lineage
+
+
+def _latest_complete_run_for_lineage(
+    db: Session, lineage: str
+) -> MLModelRun | None:
+    # Lineage lives in JSON for backward compatibility with Phase 5 tables, so
+    # filter a bounded recent set in Python instead of returning a stale legacy
+    # model just because it is the newest row with status=complete.
+    candidates = db.execute(
+        select(MLModelRun)
+        .where(MLModelRun.status == "complete")
+        .order_by(desc(MLModelRun.completed_at), desc(MLModelRun.id))
+        .limit(500)
+    ).scalars().all()
+    return next((run for run in candidates if _run_lineage(run) == lineage), None)
+
+
 def _model_run_payload(run: MLModelRun) -> dict:
     metrics = _json_or(run.metrics_json, {})
     benchmark = {"examples": run.test_examples, "positives": run.test_positives}
@@ -460,7 +501,9 @@ def _model_run_payload(run: MLModelRun) -> dict:
         },
         "decisionThreshold": run.decision_threshold,
         "metrics": metrics,
+        "modelLineage": metrics.get("modelLineage") or _json_or(run.leakage_policy_json, {}).get("modelLineage"),
         "benchmarkQualification": metrics.get("benchmarkQualification"),
+        "benchmarkSnapshot": metrics.get("benchmarkSnapshot") or _json_or(run.leakage_policy_json, {}).get("benchmarkSnapshot"),
         "baseline": metrics.get("baseline"),
         "modelDeltaVsBaseline": metrics.get("modelDeltaVsBaseline"),
         "benchmarkProtocol": metrics.get("benchmarkProtocol"),
@@ -474,13 +517,12 @@ def _model_run_payload(run: MLModelRun) -> dict:
 
 @app.get("/api/v1/ml/status")
 def ml_status(db: Session = Depends(db_session)) -> dict:
-    run = db.execute(
-        select(MLModelRun).order_by(desc(MLModelRun.created_at), desc(MLModelRun.id)).limit(1)
-    ).scalar_one_or_none()
+    run = _latest_run(db)
     if run is None:
         return {
             "status": "waiting_for_trainer",
             "message": "No predictive-maintenance training run has been recorded yet.",
+            "modelLineage": DEFAULT_MODEL_LINEAGE,
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         }
     return {
@@ -491,24 +533,38 @@ def ml_status(db: Session = Depends(db_session)) -> dict:
 
 @app.get("/api/v1/ml/benchmark")
 def ml_benchmark(db: Session = Depends(db_session)) -> dict:
-    run = db.execute(
-        select(MLModelRun)
-        .where(MLModelRun.status == "complete")
-        .order_by(desc(MLModelRun.completed_at), desc(MLModelRun.id))
-        .limit(1)
-    ).scalar_one_or_none()
+    # The benchmark endpoint represents the *active* model lineage, including
+    # its accumulating/insufficient-data state. Never fall back to an older
+    # complete lineage while the current trainer is waiting for valid labels.
+    run = _latest_run(db)
     if run is None:
         return {
             "status": "waiting_for_trainer",
-            "message": "No complete predictive-maintenance run is available yet.",
+            "message": "No predictive-maintenance run is available yet.",
+            "modelLineage": DEFAULT_MODEL_LINEAGE,
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         }
 
     payload = _model_run_payload(run)
+    if run.status != "complete":
+        return {
+            "runId": run.id,
+            "status": run.status,
+            "message": run.notes or "Current model lineage is still accumulating causal training evidence.",
+            "qualification": payload.get("benchmarkQualification"),
+            "snapshot": payload.get("benchmarkSnapshot"),
+            "modelLineage": payload.get("modelLineage") or _run_lineage(run),
+            "protocol": payload.get("benchmarkProtocol"),
+            "dataset": payload.get("dataset"),
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+        }
+
     return {
         "runId": run.id,
         "status": payload.get("benchmarkQualification", {}).get("status", "legacy_run"),
         "qualification": payload.get("benchmarkQualification"),
+        "snapshot": payload.get("benchmarkSnapshot"),
+        "modelLineage": payload.get("modelLineage"),
         "protocol": payload.get("benchmarkProtocol"),
         "xgboost": payload.get("metrics"),
         "baseline": payload.get("baseline"),
@@ -523,12 +579,8 @@ def ml_predictions(
     limit: int = Query(default=25, ge=1, le=500),
     db: Session = Depends(db_session),
 ) -> list[dict]:
-    run = db.execute(
-        select(MLModelRun)
-        .where(MLModelRun.status == "complete")
-        .order_by(desc(MLModelRun.completed_at), desc(MLModelRun.id))
-        .limit(1)
-    ).scalar_one_or_none()
+    active_lineage = _active_model_lineage(db)
+    run = _latest_complete_run_for_lineage(db, active_lineage)
     if run is None:
         return []
 
@@ -560,15 +612,23 @@ def ml_predictions(
 
 @app.get("/api/v1/ml/vehicles/{vehicle_id}")
 def ml_vehicle_prediction(vehicle_id: str, db: Session = Depends(db_session)) -> dict:
+    active_lineage = _active_model_lineage(db)
+    run = _latest_complete_run_for_lineage(db, active_lineage)
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No complete ML prediction is available for active lineage {active_lineage}",
+        )
     row = db.execute(
         select(MLPrediction)
-        .where(MLPrediction.vehicle_id == vehicle_id)
-        .order_by(desc(MLPrediction.generated_at), desc(MLPrediction.id))
+        .where(
+            MLPrediction.vehicle_id == vehicle_id,
+            MLPrediction.model_run_id == run.id,
+        )
         .limit(1)
     ).scalar_one_or_none()
     if row is None:
-        raise HTTPException(status_code=404, detail="No ML prediction available for vehicle")
-    run = db.get(MLModelRun, row.model_run_id)
+        raise HTTPException(status_code=404, detail="No current-lineage ML prediction available for vehicle")
     return {
         "vehicleId": row.vehicle_id,
         "probability": row.probability,
@@ -587,9 +647,10 @@ def ml_vehicle_prediction(vehicle_id: str, db: Session = Depends(db_session)) ->
 def ml_vehicle_prediction_history(
     vehicle_id: str,
     limit: int = Query(default=60, ge=2, le=250),
+    include_legacy: bool = Query(default=False, alias="includeLegacy"),
     db: Session = Depends(db_session),
 ) -> dict:
-    rows = db.execute(
+    raw_rows = db.execute(
         select(MLPrediction, MLModelRun)
         .join(MLModelRun, MLModelRun.id == MLPrediction.model_run_id)
         .where(
@@ -597,14 +658,39 @@ def ml_vehicle_prediction_history(
             MLModelRun.status == "complete",
         )
         .order_by(desc(MLPrediction.generated_at), desc(MLPrediction.id))
-        .limit(limit)
+        .limit(1000)
     ).all()
-    if not rows:
+    if not raw_rows:
         raise HTTPException(status_code=404, detail="No ML prediction history available for vehicle")
+
+    def lineage(run: MLModelRun) -> str:
+        policy = _json_or(run.leakage_policy_json, {})
+        return str(policy.get("modelLineage") or "legacy")
+
+    latest_lineage = _active_model_lineage(db)
+    lineage_rows = (
+        raw_rows
+        if include_legacy
+        else [row for row in raw_rows if lineage(row[1]) == latest_lineage]
+    )
+    excluded_lineage = len(raw_rows) - len(lineage_rows)
+
+    chronological = list(reversed(lineage_rows))
+    epoch_start = 0
+    if not include_legacy:
+        for index in range(1, len(chronological)):
+            previous = chronological[index - 1][0]
+            current = chronological[index][0]
+            if previous.anchor_mileage - current.anchor_mileage > 50.0:
+                epoch_start = index
+    epoch_rows = chronological[epoch_start:]
+    excluded_epoch = len(chronological) - len(epoch_rows)
+    epoch_rows = epoch_rows[-limit:]
 
     points = [
         {
             "modelRunId": prediction.model_run_id,
+            "modelLineage": lineage(run),
             "generatedAt": prediction.generated_at.isoformat(),
             "anchorMileage": prediction.anchor_mileage,
             "probability": prediction.probability,
@@ -613,11 +699,24 @@ def ml_vehicle_prediction_history(
             "firmware": prediction.firmware,
             "pumpRevision": prediction.pump_revision,
         }
-        for prediction, run in reversed(rows)
+        for prediction, run in epoch_rows
     ]
+    if not points:
+        raise HTTPException(status_code=404, detail="No comparable ML prediction history available for vehicle")
+
     return {
         "vehicleId": vehicle_id,
+        "modelLineage": latest_lineage if not include_legacy else "mixed",
+        "includeLegacy": include_legacy,
         "points": points,
         "latest": points[-1],
+        "historyPolicy": {
+            "sameModelLineageOnly": not include_legacy,
+            "latestMileageEpochOnly": not include_legacy,
+            "mileageResetDropMiles": 50.0,
+            "excludedPriorLineagePoints": excluded_lineage,
+            "excludedPriorEpochPoints": excluded_epoch,
+            "continuousPlotSafe": not include_legacy,
+        },
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }

@@ -33,6 +33,7 @@ class SimulationTests(unittest.TestCase):
         vehicle = Vehicle(
             "EV-F", "SY", "Austin", "2026.32.4", "CP-17", 60000, 0.3, 38, 1.0,
             failure_threshold=0.90,
+            initial_mileage=56000,
         )
         step = sample_step(vehicle, 18000, 500, 120, random.Random(8))
         self.assertIsNotNone(step.failure_event)
@@ -43,6 +44,14 @@ class SimulationTests(unittest.TestCase):
 
         second = sample_step(vehicle, 18120, 500, 120, random.Random(9))
         self.assertIsNone(second.failure_event)
+
+    def test_failure_requires_observation_warmup(self):
+        vehicle = Vehicle(
+            "EV-W", "SY", "Austin", "2026.32.4", "CP-17", 60000, 0.3, 38, 1.0,
+            failure_threshold=0.90,
+        )
+        step = sample_step(vehicle, 18000, 500, 120, random.Random(8))
+        self.assertIsNone(step.failure_event)
 
 
 if __name__ == "__main__":

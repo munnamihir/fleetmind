@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 
+MIN_FAILURE_OBSERVATION_MILES = 3000.0
+
+
 @dataclass
 class Vehicle:
     id: str
@@ -177,9 +180,12 @@ def sample_step(
     telemetry, degradation = _sample_internal(vehicle, tick, vehicle_count, events_per_second, rng, time_acceleration)
     failure_event = None
 
+    driven_miles = max(0.0, vehicle.mileage - float(vehicle.initial_mileage or vehicle.mileage))
+
     if (
         vehicle.pump_revision == "CP-17"
         and not vehicle.failure_emitted
+        and driven_miles >= MIN_FAILURE_OBSERVATION_MILES
         and degradation >= vehicle.failure_threshold
     ):
         vehicle.failure_emitted = True
