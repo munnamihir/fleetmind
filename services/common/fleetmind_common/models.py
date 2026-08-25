@@ -9,6 +9,7 @@ class Telemetry(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    experiment_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
     model: Mapped[str] = mapped_column(String(32))
     factory: Mapped[str] = mapped_column(String(32), index=True)
@@ -56,6 +57,7 @@ class FailureEvent(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    experiment_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     vehicle_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     model: Mapped[str] = mapped_column(String(32))
     factory: Mapped[str] = mapped_column(String(32), index=True)

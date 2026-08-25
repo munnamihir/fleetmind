@@ -4,6 +4,8 @@ import json
 import os
 import random
 import time
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from confluent_kafka import Producer
 from .sim import build_fleet, sample_step
@@ -15,6 +17,7 @@ VEHICLE_COUNT = int(os.getenv("SIMULATED_VEHICLES", "500"))
 EVENTS_PER_SECOND = int(os.getenv("SIM_EVENTS_PER_SECOND", "120"))
 SEED = int(os.getenv("SIM_SEED", "20260824"))
 TIME_ACCELERATION = float(os.getenv("SIM_TIME_ACCELERATION", "600"))
+EXPERIMENT_ID = os.getenv("SIM_EXPERIMENT_ID") or f"exp-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex[:8]}"
 
 
 def publish(producer: Producer, topic: str, key: str, event: dict) -> None:
@@ -32,7 +35,7 @@ def main() -> None:
     producer = Producer({"bootstrap.servers": BOOTSTRAP, "linger.ms": 20, "batch.num.messages": 10000})
     print(
         f"FleetMind simulator: {len(fleet)} vehicles -> {TOPIC} @ {EVENTS_PER_SECOND} events/s; "
-        f"ground truth -> {FAILURE_TOPIC}; time acceleration={TIME_ACCELERATION:g}x",
+        f"ground truth -> {FAILURE_TOPIC}; time acceleration={TIME_ACCELERATION:g}x; experiment={EXPERIMENT_ID}",
         flush=True,
     )
 
@@ -44,11 +47,14 @@ def main() -> None:
             for offset in range(EVENTS_PER_SECOND):
                 vehicle = fleet[(tick + offset) % len(fleet)]
                 step = sample_step(vehicle, tick, VEHICLE_COUNT, EVENTS_PER_SECOND, rng, TIME_ACCELERATION)
+                step.telemetry["experimentId"] = EXPERIMENT_ID
                 publish(producer, TOPIC, vehicle.id, step.telemetry)
                 if step.failure_event is not None:
+                    step.failure_event["experimentId"] = EXPERIMENT_ID
                     publish(producer, FAILURE_TOPIC, vehicle.id, step.failure_event)
                     print(
-                        f"ground-truth failure: {vehicle.id} {vehicle.pump_revision} "
+                        f"ground-truth failure: {vehicle.id} "
+                        f"{step.failure_event['component']}/{step.failure_event['failureMode']} "
                         f"at {step.failure_event['vehicle']['mileage']} mi",
                         flush=True,
                     )

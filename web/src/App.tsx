@@ -347,19 +347,42 @@ export function App() {
 
   useEffect(() => {
     let alive = true;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+
+    const pollDelayMs = 3000;
+
+    async function fetchJson<T>(url: string, signal: AbortSignal): Promise<T> {
+      const response = await fetch(url, { signal });
+
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}: ${url}`);
+      }
+
+      return response.json() as Promise<T>;
+    }
+
     async function refresh() {
+      if (!alive) return;
+
+      controller = new AbortController();
+
       try {
         const [s, a, c, r, f, fo, fr, ms, mp] = await Promise.all([
-          fetch(`${API}/api/v1/fleet/summary`).then(response => response.json()),
-          fetch(`${API}/api/v1/alerts?limit=10`).then(response => response.json()),
-          fetch(`${API}/api/v1/cohorts/pump-revisions`).then(response => response.json()),
-          fetch(`${API}/api/v1/reliability/pump-revisions`).then(response => response.json()),
-          fetch(`${API}/api/v1/reliability/failures?limit=12`).then(response => response.json()),
-          fetch(`${API}/api/v1/firmware/overview`).then(response => response.json()),
-          fetch(`${API}/api/v1/firmware/regression?target=2026.32.4&control=2026.32.1`).then(response => response.json()),
-          fetch(`${API}/api/v1/ml/status`).then(response => response.json()),
-          fetch(`${API}/api/v1/ml/predictions?limit=20`).then(response => response.json()),
+          fetchJson<Summary>(`${API}/api/v1/fleet/summary`, controller.signal),
+          fetchJson<Alert[]>(`${API}/api/v1/alerts?limit=10`, controller.signal),
+          fetchJson<Cohort[]>(`${API}/api/v1/cohorts/pump-revisions`, controller.signal),
+          fetchJson<ReliabilityCohort[]>(`${API}/api/v1/reliability/pump-revisions`, controller.signal),
+          fetchJson<FailureRow[]>(`${API}/api/v1/reliability/failures?limit=12`, controller.signal),
+          fetchJson<FirmwareOverviewRow[]>(`${API}/api/v1/firmware/overview`, controller.signal),
+          fetchJson<FirmwareRegression>(
+            `${API}/api/v1/firmware/regression?target=2026.32.4&control=2026.32.1`,
+            controller.signal,
+          ),
+          fetchJson<MLStatus>(`${API}/api/v1/ml/status`, controller.signal),
+          fetchJson<MLPrediction[]>(`${API}/api/v1/ml/predictions?limit=20`, controller.signal),
         ]);
+
         if (alive) {
           setSummary(s);
           setAlerts(a);
@@ -372,15 +395,35 @@ export function App() {
           setMlPredictions(mp);
           setConnected(true);
         }
-      } catch {
-        if (alive) setConnected(false);
+      } catch (error) {
+        if (
+          alive &&
+          !(error instanceof DOMException && error.name === 'AbortError')
+        ) {
+          console.error('FleetMind dashboard refresh failed:', error);
+          setConnected(false);
+        }
+      } finally {
+        controller = undefined;
+
+        // Never overlap polling cycles. The next cycle starts only after all
+        // requests from this cycle have settled.
+        if (alive) {
+          timerId = setTimeout(refresh, pollDelayMs);
+        }
       }
     }
-    refresh();
-    const id = setInterval(refresh, 3000);
+
+    void refresh();
+
     return () => {
       alive = false;
-      clearInterval(id);
+
+      if (timerId !== undefined) {
+        clearTimeout(timerId);
+      }
+
+      controller?.abort();
     };
   }, []);
 
