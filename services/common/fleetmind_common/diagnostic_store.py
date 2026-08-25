@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -206,5 +206,66 @@ class DiagnosticEvent(Base):
             "ix_diagnostic_event_experiment_vehicle",
             "experiment_id",
             "vehicle_id",
+        ),
+    )
+
+
+class DiagnosticEpisode(Base):
+    __tablename__ = "diagnostic_episodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
+    rules_version: Mapped[str] = mapped_column(String(64), index=True)
+    source_event_rules_version: Mapped[str] = mapped_column(String(64), index=True)
+    hypothesis_class: Mapped[str] = mapped_column(String(64), index=True)
+    state: Mapped[str] = mapped_column(String(32), index=True)
+    start_reason: Mapped[str] = mapped_column(String(48), index=True)
+    start_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    start_mileage: Mapped[float] = mapped_column(Float)
+    end_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    end_mileage: Mapped[float] = mapped_column(Float)
+    is_open: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    left_censored: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    event_count: Mapped[int] = mapped_column(Integer, default=0)
+    escalation_count: Mapped[int] = mapped_column(Integer, default=0)
+    deescalation_count: Mapped[int] = mapped_column(Integer, default=0)
+    class_change_count: Mapped[int] = mapped_column(Integer, default=0)
+    stabilized_count: Mapped[int] = mapped_column(Integer, default=0)
+    destabilized_count: Mapped[int] = mapped_column(Integer, default=0)
+    peak_confidence: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    latest_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    event_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "vehicle_id",
+            "hypothesis_class",
+            "start_timestamp",
+            name="uq_diagnostic_episode_run_vehicle_class_start",
+        ),
+        Index(
+            "ix_diagnostic_episode_run_state_start",
+            "run_id",
+            "state",
+            "start_timestamp",
+        ),
+        Index(
+            "ix_diagnostic_episode_run_vehicle_start",
+            "run_id",
+            "vehicle_id",
+            "start_timestamp",
+        ),
+        Index(
+            "ix_diagnostic_episode_experiment_class",
+            "experiment_id",
+            "hypothesis_class",
         ),
     )
