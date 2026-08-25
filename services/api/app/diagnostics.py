@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from fleetmind_common.db import SessionLocal
@@ -270,3 +270,88 @@ def diagnostic_incidents(
         }
         for row in rows
     ]
+
+@router.get("/summary")
+def diagnostics_summary(
+    high_confidence_threshold: float = Query(default=0.70, ge=0.0, le=1.0),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Summarize current operational hypotheses for the active diagnostic run."""
+
+    experiment_id, run = _require_current_run(db)
+
+    class_rows = db.execute(
+        select(
+            DiagnosticPrediction.top_class,
+            func.count(DiagnosticPrediction.id),
+            func.avg(DiagnosticPrediction.top_confidence),
+            func.max(DiagnosticPrediction.top_confidence),
+        )
+        .where(DiagnosticPrediction.run_id == run.id)
+        .group_by(DiagnosticPrediction.top_class)
+        .order_by(desc(func.count(DiagnosticPrediction.id)))
+    ).all()
+
+    total_vehicles = int(
+        db.scalar(
+            select(func.count(DiagnosticPrediction.id)).where(
+                DiagnosticPrediction.run_id == run.id
+            )
+        )
+        or 0
+    )
+    non_healthy_vehicles = int(
+        db.scalar(
+            select(func.count(DiagnosticPrediction.id)).where(
+                DiagnosticPrediction.run_id == run.id,
+                DiagnosticPrediction.top_class != "healthy",
+            )
+        )
+        or 0
+    )
+    high_confidence_incidents = int(
+        db.scalar(
+            select(func.count(DiagnosticPrediction.id)).where(
+                DiagnosticPrediction.run_id == run.id,
+                DiagnosticPrediction.top_class != "healthy",
+                DiagnosticPrediction.top_confidence >= high_confidence_threshold,
+            )
+        )
+        or 0
+    )
+    average_confidence = db.scalar(
+        select(func.avg(DiagnosticPrediction.top_confidence)).where(
+            DiagnosticPrediction.run_id == run.id
+        )
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "champion": run.champion,
+        "totalVehicles": total_vehicles,
+        "nonHealthyVehicles": non_healthy_vehicles,
+        "highConfidenceIncidents": high_confidence_incidents,
+        "highConfidenceThreshold": high_confidence_threshold,
+        "averageTopConfidence": (
+            round(float(average_confidence), 6)
+            if average_confidence is not None
+            else None
+        ),
+        "byClass": [
+            {
+                "class": top_class,
+                "vehicles": int(vehicle_count),
+                "averageConfidence": round(float(avg_confidence or 0.0), 6),
+                "maxConfidence": round(float(max_confidence or 0.0), 6),
+            }
+            for top_class, vehicle_count, avg_confidence, max_confidence
+            in class_rows
+        ],
+        "interpretationPolicy": (
+            "Counts summarize current model hypotheses for the active "
+            "diagnostic run; they are not failure ground truth."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }

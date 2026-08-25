@@ -16,10 +16,11 @@ import {
   Wrench,
   Zap,
 } from 'lucide-react';
+import { RootCauseDashboard } from './RootCauseDashboard';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
-type Page = 'fleet' | 'reliability' | 'firmware' | 'ml';
+type Page = 'fleet' | 'reliability' | 'firmware' | 'ml' | 'diagnostics';
 
 type Summary = {
   vehiclesMonitored: number;
@@ -462,6 +463,7 @@ export function App() {
           <button><Cpu size={17} /> Components</button>
           <button className={page === 'firmware' ? 'navActive' : ''} onClick={() => setPage('firmware')}><Zap size={17} /> Firmware</button>
           <button className={page === 'ml' ? 'navActive' : ''} onClick={() => setPage('ml')}><BrainCircuit size={17} /> Predictive ML</button>
+          <button className={page === 'diagnostics' ? 'navActive' : ''} onClick={() => setPage('diagnostics')}><Wrench size={17} /> Root Cause</button>
         </nav>
         <div className="sidebarFoot">
           <Radio size={15} />
@@ -489,8 +491,10 @@ export function App() {
             overview={firmwareOverview}
             regression={firmwareRegression}
           />
-        ) : (
+        ) : page === 'ml' ? (
           <MLDashboard status={mlStatus} predictions={mlPredictions} />
+        ) : (
+          <RootCauseDashboard />
         )}
       </main>
     </div>
@@ -508,7 +512,9 @@ function Header({ connected, page }: { connected: boolean; page: Page }) {
               ? 'RELIABILITY SCIENCE / COOLANT PUMP'
               : page === 'firmware'
                 ? 'FIRMWARE REGRESSION LAB / MATCHED COHORTS'
-                : 'PREDICTIVE MAINTENANCE ML / FORWARD FAILURE HORIZON'}
+                : page === 'ml'
+                  ? 'PREDICTIVE MAINTENANCE ML / FORWARD FAILURE HORIZON'
+                  : 'ROOT CAUSE INTELLIGENCE / COMPETING HYPOTHESES'}
         </p>
         <h1>
           {page === 'fleet'
@@ -517,7 +523,9 @@ function Header({ connected, page }: { connected: boolean; page: Page }) {
               ? 'Field reliability, quantified from observed life.'
               : page === 'firmware'
                 ? 'Did the software change the failure rate?'
-                : 'Predict the failure before the fault code exists.'}
+                : page === 'ml'
+                  ? 'Predict the failure before the fault code exists.'
+                  : 'Rank the root cause, then inspect the evidence.'}
         </h1>
       </div>
       <div className={`live ${connected ? 'on' : ''}`}>
