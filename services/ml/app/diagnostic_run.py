@@ -31,7 +31,11 @@ from fleetmind_common.diagnostic_dataset import (
     split_diagnostic_examples,
 )
 from fleetmind_common.diagnostic_evidence import observable_evidence
-from fleetmind_common.diagnostic_store import DiagnosticModelRun, DiagnosticPrediction
+from fleetmind_common.diagnostic_store import (
+    DiagnosticModelRun,
+    DiagnosticPrediction,
+    DiagnosticReplayPoint,
+)
 from fleetmind_common.diagnostics import DiagnosticTelemetryPoint, extract_diagnostic_features
 from app.diagnostic_models import (
     DIAGNOSTIC_MODEL_LINEAGE,
@@ -73,6 +77,14 @@ MAX_EXAMPLES_PER_VEHICLE = int(
 )
 MAX_TELEMETRY_ROWS = int(
     os.getenv("DIAGNOSTIC_MAX_TELEMETRY_ROWS", "300000")
+)
+REPLAY_ROWS_PER_VEHICLE = max(
+    WINDOW_SIZE,
+    int(os.getenv("DIAGNOSTIC_REPLAY_ROWS_PER_VEHICLE", "96")),
+)
+REPLAY_STRIDE = max(
+    1,
+    int(os.getenv("DIAGNOSTIC_REPLAY_STRIDE", "6")),
 )
 BENCHMARK_FRACTION = float(
     os.getenv("DIAGNOSTIC_BENCHMARK_FRACTION", "0.20")
@@ -424,7 +436,7 @@ def load_current_scoring_telemetry(
     db,
     experiment_id: str,
 ) -> Dict[str, List[DiagnosticTelemetryPoint]]:
-    """Load the latest observable window per vehicle for live inference."""
+    """Load bounded recent observable history per vehicle for live inference."""
 
     rows = db.execute(
         text(
@@ -482,7 +494,7 @@ def load_current_scoring_telemetry(
         ),
         {
             "experiment_id": experiment_id,
-            "window_size": WINDOW_SIZE,
+            "window_size": max(WINDOW_SIZE, REPLAY_ROWS_PER_VEHICLE),
         },
     ).mappings().all()
 
@@ -651,6 +663,68 @@ def latest_scoring_examples(
     return examples
 
 
+
+def replay_scoring_examples(
+    scoring_by_vehicle: Mapping[str, Sequence[DiagnosticTelemetryPoint]],
+    *,
+    experiment_id: str,
+) -> list[DiagnosticExample]:
+    """Create observable-only historical scoring windows for incident replay."""
+
+    examples: list[DiagnosticExample] = []
+
+    for vehicle_id, raw_points in sorted(scoring_by_vehicle.items()):
+        points = sorted(
+            [
+                point
+                for point in raw_points
+                if point.experiment_id == experiment_id
+            ],
+            key=lambda point: point.timestamp,
+        )
+
+        if len(points) < WINDOW_SIZE:
+            continue
+
+        anchor_indexes = list(
+            range(
+                WINDOW_SIZE - 1,
+                len(points),
+                REPLAY_STRIDE,
+            )
+        )
+
+        if not anchor_indexes or anchor_indexes[-1] != len(points) - 1:
+            anchor_indexes.append(len(points) - 1)
+
+        for anchor_index in anchor_indexes:
+            window = points[
+                anchor_index - WINDOW_SIZE + 1:
+                anchor_index + 1
+            ]
+            anchor = window[-1]
+
+            try:
+                features = extract_diagnostic_features(window)
+            except ValueError:
+                continue
+
+            # Structural placeholder only. Prediction reads observable features;
+            # no private failure truth is consulted for replay scoring.
+            examples.append(
+                DiagnosticExample(
+                    vehicle_id=vehicle_id,
+                    experiment_id=experiment_id,
+                    anchor_timestamp=anchor.timestamp,
+                    anchor_mileage=float(anchor.mileage),
+                    label="healthy",
+                    features=features,
+                    miles_to_failure=None,
+                )
+            )
+
+    return examples
+
 def _champion_model(
     champion: str,
     baseline,
@@ -780,6 +854,49 @@ def persist_diagnostic_run(
 
             db.add_all(predictions)
 
+            replay_examples = replay_scoring_examples(
+                scoring_by_vehicle,
+                experiment_id=experiment_id,
+            )
+            replay_ranked = predict_ranked_hypotheses(
+                model,
+                replay_examples,
+                feature_names=comparison.feature_names,
+                top_k=3,
+            )
+
+            replay_points = []
+            for example, hypotheses in zip(
+                replay_examples,
+                replay_ranked,
+            ):
+                top = hypotheses[0]
+                replay_points.append(
+                    DiagnosticReplayPoint(
+                        run_id=run.id,
+                        generated_at=generated_at,
+                        experiment_id=experiment_id,
+                        vehicle_id=example.vehicle_id,
+                        anchor_timestamp=example.anchor_timestamp,
+                        anchor_mileage=example.anchor_mileage,
+                        top_class=str(top["class"]),
+                        top_confidence=float(top["confidence"]),
+                        hypotheses_json=json.dumps(
+                            hypotheses,
+                            sort_keys=True,
+                        ),
+                        evidence_json=json.dumps(
+                            observable_evidence(
+                                str(top["class"]),
+                                example.features,
+                            ),
+                            sort_keys=True,
+                        ),
+                    )
+                )
+
+            db.add_all(replay_points)
+
         db.commit()
         return int(run.id)
 
@@ -891,6 +1008,13 @@ def run_once() -> dict:
                 "windowSize": WINDOW_SIZE,
                 "vehiclesLoaded": len(scoring_by_vehicle),
                 "usesPrivateFailureTruth": False,
+                "historyRowsPerVehicle": max(
+                    WINDOW_SIZE,
+                    REPLAY_ROWS_PER_VEHICLE,
+                ),
+                "replayStrideSamples": REPLAY_STRIDE,
+                "replayWindowSize": WINDOW_SIZE,
+                "replayPolicy": "observable_only_same_run",
             },
             "failureEventsLoaded": len(failures),
             "failureVehiclesLoaded": len(

@@ -56,6 +56,59 @@ def _index_exists(connection, table_name: str, index_name: str) -> bool:
     )
 
 
+def _index_is_unique(
+    connection,
+    table_name: str,
+    index_name: str,
+) -> bool:
+    index_definition = connection.execute(
+        text(
+            """
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND tablename = :table_name
+              AND indexname = :index_name
+            """
+        ),
+        {
+            "table_name": table_name,
+            "index_name": index_name,
+        },
+    ).scalar_one_or_none()
+
+    if not index_definition:
+        return False
+
+    return "CREATE UNIQUE INDEX" in str(index_definition).upper()
+
+
+def _constraint_exists(
+    connection,
+    table_name: str,
+    constraint_name: str,
+) -> bool:
+    return bool(
+        connection.execute(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.table_constraints
+                    WHERE constraint_schema = current_schema()
+                      AND table_name = :table_name
+                      AND constraint_name = :constraint_name
+                )
+                """
+            ),
+            {
+                "table_name": table_name,
+                "constraint_name": constraint_name,
+            },
+        ).scalar()
+    )
+
+
 def ensure_schema_compatibility() -> None:
     """
     Apply FleetMind additive compatibility migrations safely.
@@ -122,6 +175,67 @@ def ensure_schema_compatibility() -> None:
                     """
                     CREATE INDEX ix_failure_events_experiment_id
                     ON failure_events (experiment_id)
+                    """
+                )
+            )
+
+
+        # Phase 6.6.2: failure truth is unique per experiment + vehicle.
+        if _constraint_exists(
+            connection,
+            "failure_events",
+            "failure_events_vehicle_id_key",
+        ):
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE failure_events
+                    DROP CONSTRAINT failure_events_vehicle_id_key
+                    """
+                )
+            )
+
+        if (
+            _index_exists(
+                connection,
+                "failure_events",
+                "ix_failure_events_vehicle_id",
+            )
+            and _index_is_unique(
+                connection,
+                "failure_events",
+                "ix_failure_events_vehicle_id",
+            )
+        ):
+            connection.execute(
+                text("DROP INDEX ix_failure_events_vehicle_id")
+            )
+
+        if not _index_exists(
+            connection,
+            "failure_events",
+            "ix_failure_events_vehicle_id",
+        ):
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX ix_failure_events_vehicle_id
+                    ON failure_events (vehicle_id)
+                    """
+                )
+            )
+
+        if not _index_exists(
+            connection,
+            "failure_events",
+            "uq_failure_events_experiment_vehicle",
+        ):
+            connection.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX
+                    uq_failure_events_experiment_vehicle
+                    ON failure_events (experiment_id, vehicle_id)
                     """
                 )
             )
