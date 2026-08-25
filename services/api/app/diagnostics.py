@@ -8,7 +8,11 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from fleetmind_common.db import SessionLocal
+from fleetmind_common.diagnostic_event_rules import (
+    DIAGNOSTIC_EVENT_TYPES,
+)
 from fleetmind_common.diagnostic_store import (
+    DiagnosticEvent,
     DiagnosticModelRun,
     DiagnosticPrediction,
     DiagnosticReplayPoint,
@@ -653,6 +657,234 @@ def diagnostic_transitions(
             "operational review heuristics, not calibrated failure risk, "
             "private failure truth, attribution, or causal proof."
         ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _diagnostic_event_payload(row: DiagnosticEvent) -> dict:
+    return {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "rulesVersion": row.rules_version,
+        "vehicleId": row.vehicle_id,
+        "eventType": row.event_type,
+        "anchorTimestamp": row.anchor_timestamp.isoformat(),
+        "anchorMileage": round(float(row.anchor_mileage), 1),
+        "previousClass": row.previous_class,
+        "currentClass": row.current_class,
+        "previousConfidence": (
+            round(float(row.previous_confidence), 6)
+            if row.previous_confidence is not None
+            else None
+        ),
+        "currentConfidence": (
+            round(float(row.current_confidence), 6)
+            if row.current_confidence is not None
+            else None
+        ),
+        "confidenceDelta": (
+            round(float(row.confidence_delta), 8)
+            if row.confidence_delta is not None
+            else None
+        ),
+        "slopePer1kMiles": (
+            round(float(row.slope_per_1k_miles), 8)
+            if row.slope_per_1k_miles is not None
+            else None
+        ),
+        "observableEvidence": _json_list(row.evidence_json),
+        "details": _json_object(row.details_json),
+    }
+
+
+@router.get("/events")
+def diagnostic_events(
+    limit: int = Query(default=100, ge=1, le=500),
+    event_type: str | None = Query(default=None),
+    vehicle_id: str | None = Query(default=None),
+    hypothesis_class: str | None = Query(default=None),
+    min_confidence: float | None = Query(
+        default=None,
+        ge=0.0,
+        le=1.0,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Return persisted replay-derived audit events for the current run."""
+
+    experiment_id, run = _require_current_run(db)
+
+    if (
+        event_type is not None
+        and event_type not in DIAGNOSTIC_EVENT_TYPES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported diagnostic event type",
+                "allowed": list(DIAGNOSTIC_EVENT_TYPES),
+            },
+        )
+
+    filters = [
+        DiagnosticEvent.run_id == run.id,
+        DiagnosticEvent.experiment_id == experiment_id,
+    ]
+
+    if event_type is not None:
+        filters.append(DiagnosticEvent.event_type == event_type)
+    if vehicle_id is not None:
+        filters.append(DiagnosticEvent.vehicle_id == vehicle_id)
+    if hypothesis_class is not None:
+        filters.append(DiagnosticEvent.current_class == hypothesis_class)
+    if min_confidence is not None:
+        filters.append(
+            DiagnosticEvent.current_confidence >= min_confidence
+        )
+
+    total_matched = int(
+        db.scalar(
+            select(func.count(DiagnosticEvent.id)).where(*filters)
+        )
+        or 0
+    )
+
+    rows = db.execute(
+        select(DiagnosticEvent)
+        .where(*filters)
+        .order_by(
+            desc(DiagnosticEvent.anchor_timestamp),
+            desc(DiagnosticEvent.id),
+        )
+        .limit(limit)
+    ).scalars().all()
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "champion": run.champion,
+        "totalMatched": total_matched,
+        "returned": len(rows),
+        "filters": {
+            "eventType": event_type,
+            "vehicleId": vehicle_id,
+            "hypothesisClass": hypothesis_class,
+            "minConfidence": min_confidence,
+        },
+        "events": [
+            _diagnostic_event_payload(row)
+            for row in rows
+        ],
+        "scopePolicy": {
+            "currentRunOnly": True,
+            "exactExperimentOnly": True,
+            "replayDerivedOnly": True,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+        },
+        "interpretationPolicy": (
+            "Diagnostic events are deterministic state changes derived from "
+            "persisted current-run replayed model hypotheses. They are not "
+            "physical failure events, calibrated failure risk, private "
+            "failure truth, attribution, or causal proof."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/events/summary")
+def diagnostic_events_summary(
+    db: Session = Depends(db_session),
+) -> dict:
+    """Summarize persisted replay-derived events for the current run."""
+
+    experiment_id, run = _require_current_run(db)
+
+    grouped = db.execute(
+        select(
+            DiagnosticEvent.event_type,
+            func.count(DiagnosticEvent.id),
+            func.count(func.distinct(DiagnosticEvent.vehicle_id)),
+        )
+        .where(
+            DiagnosticEvent.run_id == run.id,
+            DiagnosticEvent.experiment_id == experiment_id,
+        )
+        .group_by(DiagnosticEvent.event_type)
+        .order_by(DiagnosticEvent.event_type)
+    ).all()
+
+    total_events = int(
+        db.scalar(
+            select(func.count(DiagnosticEvent.id)).where(
+                DiagnosticEvent.run_id == run.id,
+                DiagnosticEvent.experiment_id == experiment_id,
+            )
+        )
+        or 0
+    )
+    vehicles_with_events = int(
+        db.scalar(
+            select(
+                func.count(
+                    func.distinct(DiagnosticEvent.vehicle_id)
+                )
+            ).where(
+                DiagnosticEvent.run_id == run.id,
+                DiagnosticEvent.experiment_id == experiment_id,
+            )
+        )
+        or 0
+    )
+    rules_version = db.scalar(
+        select(DiagnosticEvent.rules_version)
+        .where(
+            DiagnosticEvent.run_id == run.id,
+            DiagnosticEvent.experiment_id == experiment_id,
+        )
+        .order_by(desc(DiagnosticEvent.id))
+        .limit(1)
+    )
+
+    grouped_map = {
+        event_type: {
+            "events": int(event_count),
+            "vehicles": int(vehicle_count),
+        }
+        for event_type, event_count, vehicle_count in grouped
+    }
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "champion": run.champion,
+        "rulesVersion": rules_version,
+        "totalEvents": total_events,
+        "vehiclesWithEvents": vehicles_with_events,
+        "byType": [
+            {
+                "eventType": event_type,
+                "events": grouped_map.get(
+                    event_type,
+                    {},
+                ).get("events", 0),
+                "vehicles": grouped_map.get(
+                    event_type,
+                    {},
+                ).get("vehicles", 0),
+            }
+            for event_type in DIAGNOSTIC_EVENT_TYPES
+        ],
+        "scopePolicy": {
+            "currentRunOnly": True,
+            "exactExperimentOnly": True,
+            "replayDerivedOnly": True,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+        },
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
 

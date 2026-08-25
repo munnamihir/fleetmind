@@ -125,3 +125,86 @@ class DiagnosticReplayPoint(Base):
             "vehicle_id",
         ),
     )
+
+
+class DiagnosticEvent(Base):
+    __tablename__ = "diagnostic_events"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
+    rules_version: Mapped[str] = mapped_column(String(64), index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    anchor_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+    )
+    anchor_mileage: Mapped[float] = mapped_column(Float)
+    previous_class: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+    current_class: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+    previous_confidence: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    current_confidence: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        index=True,
+    )
+    confidence_delta: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    slope_per_1k_miles: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    evidence_json: Mapped[str] = mapped_column(Text, default="[]")
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "vehicle_id",
+            "event_type",
+            "anchor_timestamp",
+            name="uq_diagnostic_event_run_vehicle_type_anchor",
+        ),
+        Index(
+            "ix_diagnostic_event_run_type_timestamp",
+            "run_id",
+            "event_type",
+            "anchor_timestamp",
+        ),
+        Index(
+            "ix_diagnostic_event_run_vehicle_mileage",
+            "run_id",
+            "vehicle_id",
+            "anchor_mileage",
+        ),
+        Index(
+            "ix_diagnostic_event_experiment_vehicle",
+            "experiment_id",
+            "vehicle_id",
+        ),
+    )
