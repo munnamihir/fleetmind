@@ -11,7 +11,11 @@ from fleetmind_common.db import SessionLocal
 from fleetmind_common.diagnostic_event_rules import (
     DIAGNOSTIC_EVENT_TYPES,
 )
+from fleetmind_common.diagnostic_episode_rules import (
+    DIAGNOSTIC_EPISODE_STATES,
+)
 from fleetmind_common.diagnostic_store import (
+    DiagnosticEpisode,
     DiagnosticEvent,
     DiagnosticModelRun,
     DiagnosticPrediction,
@@ -882,6 +886,263 @@ def diagnostic_events_summary(
             "currentRunOnly": True,
             "exactExperimentOnly": True,
             "replayDerivedOnly": True,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+        },
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _diagnostic_episode_payload(row: DiagnosticEpisode) -> dict:
+    return {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "rulesVersion": row.rules_version,
+        "sourceEventRulesVersion": row.source_event_rules_version,
+        "vehicleId": row.vehicle_id,
+        "hypothesisClass": row.hypothesis_class,
+        "state": row.state,
+        "startReason": row.start_reason,
+        "startTimestamp": row.start_timestamp.isoformat(),
+        "startMileage": round(float(row.start_mileage), 1),
+        "endTimestamp": row.end_timestamp.isoformat(),
+        "endMileage": round(float(row.end_mileage), 1),
+        "observedSpanMiles": round(
+            max(0.0, float(row.end_mileage) - float(row.start_mileage)),
+            1,
+        ),
+        "isOpen": bool(row.is_open),
+        "leftCensored": bool(row.left_censored),
+        "eventCount": int(row.event_count),
+        "escalationCount": int(row.escalation_count),
+        "deescalationCount": int(row.deescalation_count),
+        "classChangeCount": int(row.class_change_count),
+        "stabilizedCount": int(row.stabilized_count),
+        "destabilizedCount": int(row.destabilized_count),
+        "peakConfidence": (
+            round(float(row.peak_confidence), 6)
+            if row.peak_confidence is not None
+            else None
+        ),
+        "latestConfidence": (
+            round(float(row.latest_confidence), 6)
+            if row.latest_confidence is not None
+            else None
+        ),
+        "eventIds": _json_list(row.event_ids_json),
+        "details": _json_object(row.details_json),
+    }
+
+
+@router.get("/episodes")
+def diagnostic_episodes(
+    limit: int = Query(default=100, ge=1, le=500),
+    state: str | None = Query(default=None),
+    vehicle_id: str | None = Query(default=None),
+    hypothesis_class: str | None = Query(default=None),
+    open_only: bool | None = Query(default=None),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+
+    if state is not None and state not in DIAGNOSTIC_EPISODE_STATES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported diagnostic episode state",
+                "allowed": list(DIAGNOSTIC_EPISODE_STATES),
+            },
+        )
+
+    filters = [
+        DiagnosticEpisode.run_id == run.id,
+        DiagnosticEpisode.experiment_id == experiment_id,
+    ]
+
+    if state is not None:
+        filters.append(DiagnosticEpisode.state == state)
+    if vehicle_id is not None:
+        filters.append(DiagnosticEpisode.vehicle_id == vehicle_id)
+    if hypothesis_class is not None:
+        filters.append(DiagnosticEpisode.hypothesis_class == hypothesis_class)
+    if open_only is not None:
+        filters.append(DiagnosticEpisode.is_open == open_only)
+
+    total_matched = int(
+        db.scalar(select(func.count(DiagnosticEpisode.id)).where(*filters))
+        or 0
+    )
+
+    rows = db.execute(
+        select(DiagnosticEpisode)
+        .where(*filters)
+        .order_by(
+            desc(DiagnosticEpisode.start_timestamp),
+            desc(DiagnosticEpisode.id),
+        )
+        .limit(limit)
+    ).scalars().all()
+
+    source_rules_version = db.scalar(
+        select(DiagnosticEpisode.source_event_rules_version)
+        .where(
+            DiagnosticEpisode.run_id == run.id,
+            DiagnosticEpisode.experiment_id == experiment_id,
+        )
+        .order_by(desc(DiagnosticEpisode.id))
+        .limit(1)
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "champion": run.champion,
+        "totalMatched": total_matched,
+        "returned": len(rows),
+        "eventsSourceRequired": source_rules_version,
+        "filters": {
+            "state": state,
+            "vehicleId": vehicle_id,
+            "hypothesisClass": hypothesis_class,
+            "openOnly": open_only,
+        },
+        "episodes": [_diagnostic_episode_payload(row) for row in rows],
+        "scopePolicy": {
+            "currentRunOnly": True,
+            "exactExperimentOnly": True,
+            "eventDerivedOnly": True,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+        },
+        "interpretationPolicy": (
+            "Diagnostic episodes group persisted current-run diagnostic "
+            "events for one non-healthy model hypothesis. Episode spans are "
+            "observed model-event spans, not physical degradation or failure "
+            "intervals, calibrated failure risk, attribution, or causal proof."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/episodes/summary")
+def diagnostic_episodes_summary(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+
+    base_filters = (
+        DiagnosticEpisode.run_id == run.id,
+        DiagnosticEpisode.experiment_id == experiment_id,
+    )
+
+    total_episodes = int(
+        db.scalar(select(func.count(DiagnosticEpisode.id)).where(*base_filters))
+        or 0
+    )
+    vehicles_with_episodes = int(
+        db.scalar(
+            select(
+                func.count(func.distinct(DiagnosticEpisode.vehicle_id))
+            ).where(*base_filters)
+        )
+        or 0
+    )
+    open_episodes = int(
+        db.scalar(
+            select(func.count(DiagnosticEpisode.id)).where(
+                *base_filters,
+                DiagnosticEpisode.is_open.is_(True),
+            )
+        )
+        or 0
+    )
+    left_censored_episodes = int(
+        db.scalar(
+            select(func.count(DiagnosticEpisode.id)).where(
+                *base_filters,
+                DiagnosticEpisode.left_censored.is_(True),
+            )
+        )
+        or 0
+    )
+
+    state_rows = db.execute(
+        select(
+            DiagnosticEpisode.state,
+            func.count(DiagnosticEpisode.id),
+            func.count(func.distinct(DiagnosticEpisode.vehicle_id)),
+        )
+        .where(*base_filters)
+        .group_by(DiagnosticEpisode.state)
+        .order_by(DiagnosticEpisode.state)
+    ).all()
+
+    class_rows = db.execute(
+        select(
+            DiagnosticEpisode.hypothesis_class,
+            func.count(DiagnosticEpisode.id),
+            func.count(func.distinct(DiagnosticEpisode.vehicle_id)),
+        )
+        .where(*base_filters)
+        .group_by(DiagnosticEpisode.hypothesis_class)
+        .order_by(DiagnosticEpisode.hypothesis_class)
+    ).all()
+
+    state_map = {
+        episode_state: {
+            "episodes": int(count),
+            "vehicles": int(vehicles),
+        }
+        for episode_state, count, vehicles in state_rows
+    }
+
+    rules_version = db.scalar(
+        select(DiagnosticEpisode.rules_version)
+        .where(*base_filters)
+        .order_by(desc(DiagnosticEpisode.id))
+        .limit(1)
+    )
+    source_event_rules_version = db.scalar(
+        select(DiagnosticEpisode.source_event_rules_version)
+        .where(*base_filters)
+        .order_by(desc(DiagnosticEpisode.id))
+        .limit(1)
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "champion": run.champion,
+        "rulesVersion": rules_version,
+        "sourceEventRulesVersion": source_event_rules_version,
+        "totalEpisodes": total_episodes,
+        "vehiclesWithEpisodes": vehicles_with_episodes,
+        "openEpisodes": open_episodes,
+        "closedEpisodes": total_episodes - open_episodes,
+        "leftCensoredEpisodes": left_censored_episodes,
+        "byState": [
+            {
+                "state": episode_state,
+                "episodes": state_map.get(episode_state, {}).get("episodes", 0),
+                "vehicles": state_map.get(episode_state, {}).get("vehicles", 0),
+            }
+            for episode_state in DIAGNOSTIC_EPISODE_STATES
+        ],
+        "byClass": [
+            {
+                "hypothesisClass": hypothesis_class,
+                "episodes": int(count),
+                "vehicles": int(vehicles),
+            }
+            for hypothesis_class, count, vehicles in class_rows
+        ],
+        "scopePolicy": {
+            "currentRunOnly": True,
+            "exactExperimentOnly": True,
+            "eventDerivedOnly": True,
             "usesPrivateFailureTruth": False,
             "failureMarkersExposed": False,
         },
