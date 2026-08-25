@@ -14,7 +14,7 @@ from fleetmind_common.benchmark_snapshot import (
     load_snapshot,
     save_snapshot,
 )
-from fleetmind_common.db import Base, SessionLocal, engine
+from fleetmind_common.db import Base, SessionLocal, engine, ensure_schema_compatibility
 from fleetmind_common.ml_features import (
     FailureTruth,
     FrozenBenchmarkSplit,
@@ -67,7 +67,7 @@ MIN_BENCHMARK_FAILURE_VEHICLES = int(
 
 # A feature-schema or evaluation-protocol change must bump this lineage. Prediction
 # histories and locked benchmark artifacts are never silently joined across lineages.
-MODEL_LINEAGE = os.getenv("ML_MODEL_LINEAGE", "fm-ml-5.2-v1")
+MODEL_LINEAGE = os.getenv("ML_MODEL_LINEAGE", "fm-ml-6.1-exp-v1")
 MILEAGE_RESET_DROP_MILES = float(os.getenv("ML_MILEAGE_RESET_DROP_MILES", "50"))
 
 
@@ -91,9 +91,25 @@ def telemetry_point(row: Telemetry) -> TelemetryPoint:
     )
 
 
+def active_experiment_id(db) -> str | None:
+    return db.execute(
+        select(Telemetry.experiment_id)
+        .where(Telemetry.experiment_id.is_not(None))
+        .order_by(desc(Telemetry.id))
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def load_training_data(db):
+    experiment_id = active_experiment_id(db)
+    if experiment_id is None:
+        return {}, {}
+
     telemetry_rows = db.execute(
-        select(Telemetry).order_by(desc(Telemetry.id)).limit(MAX_TELEMETRY_ROWS)
+        select(Telemetry)
+        .where(Telemetry.experiment_id == experiment_id)
+        .order_by(desc(Telemetry.id))
+        .limit(MAX_TELEMETRY_ROWS)
     ).scalars().all()
     telemetry_rows.reverse()
 
@@ -108,7 +124,9 @@ def load_training_data(db):
         by_vehicle, reset_drop_miles=MILEAGE_RESET_DROP_MILES
     )
 
-    failure_rows = db.execute(select(FailureEvent)).scalars().all()
+    failure_rows = db.execute(
+        select(FailureEvent).where(FailureEvent.experiment_id == experiment_id)
+    ).scalars().all()
     failures = {
         row.vehicle_id: FailureTruth(
             vehicle_id=row.vehicle_id,
@@ -358,7 +376,6 @@ def prediction_summary(features: dict) -> dict:
 
 
 def train_once() -> None:
-    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         by_vehicle, failures = load_training_data(db)
@@ -560,6 +577,9 @@ def train_once() -> None:
 
 
 def main() -> None:
+    Base.metadata.create_all(bind=engine)
+    ensure_schema_compatibility()
+
     log.info(
         "FleetMind ML trainer starting lineage=%s horizon=%.0fmi window=%s stride=%s interval=%ss frozen-benchmark=%.0f%% continuity-reset=%.0fmi",
         MODEL_LINEAGE,

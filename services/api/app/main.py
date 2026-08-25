@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from fleetmind_common.db import Base, SessionLocal, engine
+from fleetmind_common.db import Base, SessionLocal, engine, ensure_schema_compatibility
 from fleetmind_common.models import Alert, FailureEvent, MLModelRun, MLPrediction, Telemetry
 from fleetmind_common.firmware import FirmwareObservation, compare_firmware, hardware_interactions
 from fleetmind_common.reliability import (
@@ -41,6 +41,7 @@ app.add_middleware(
 @app.on_event("startup")
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
+    ensure_schema_compatibility()
 
 
 def db_session():
@@ -51,12 +52,21 @@ def db_session():
         db.close()
 
 
+def active_experiment_id(db: Session) -> str | None:
+    return db.execute(
+        select(Telemetry.experiment_id)
+        .where(Telemetry.experiment_id.is_not(None))
+        .order_by(desc(Telemetry.id))
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def latest_vehicle_rows(db: Session) -> list[Telemetry]:
-    latest = (
-        select(Telemetry.vehicle_id, func.max(Telemetry.id).label("max_id"))
-        .group_by(Telemetry.vehicle_id)
-        .subquery()
-    )
+    experiment_id = active_experiment_id(db)
+    statement = select(Telemetry.vehicle_id, func.max(Telemetry.id).label("max_id"))
+    if experiment_id is not None:
+        statement = statement.where(Telemetry.experiment_id == experiment_id)
+    latest = statement.group_by(Telemetry.vehicle_id).subquery()
     return db.execute(
         select(Telemetry).join(latest, Telemetry.id == latest.c.max_id)
     ).scalars().all()
@@ -65,7 +75,13 @@ def latest_vehicle_rows(db: Session) -> list[Telemetry]:
 
 def firmware_observations(db: Session) -> list[FirmwareObservation]:
     latest_rows = latest_vehicle_rows(db)
-    failed_vehicle_ids = set(db.execute(select(FailureEvent.vehicle_id)).scalars().all())
+    experiment_id = active_experiment_id(db)
+    failure_stmt = select(FailureEvent.vehicle_id).where(
+        FailureEvent.component == "coolant_pump"
+    )
+    if experiment_id is not None:
+        failure_stmt = failure_stmt.where(FailureEvent.experiment_id == experiment_id)
+    failed_vehicle_ids = set(db.execute(failure_stmt).scalars().all())
     return [
         FirmwareObservation(
             firmware=row.firmware,
@@ -284,7 +300,11 @@ def pump_revision_cohorts(db: Session = Depends(db_session)) -> list[dict]:
 @app.get("/api/v1/reliability/pump-revisions")
 def pump_reliability(db: Session = Depends(db_session)) -> list[dict]:
     latest_rows = latest_vehicle_rows(db)
-    failures = db.execute(select(FailureEvent)).scalars().all()
+    experiment_id = active_experiment_id(db)
+    failure_stmt = select(FailureEvent).where(FailureEvent.component == "coolant_pump")
+    if experiment_id is not None:
+        failure_stmt = failure_stmt.where(FailureEvent.experiment_id == experiment_id)
+    failures = db.execute(failure_stmt).scalars().all()
     failures_by_vehicle = {f.vehicle_id: f for f in failures}
 
     cohorts: dict[str, list[Telemetry]] = defaultdict(list)

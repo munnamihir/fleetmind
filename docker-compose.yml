@@ -107,6 +107,7 @@ services:
 
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fleetmind:fleetmind@postgres:5432/fleetmind}
+      ML_MODEL_LINEAGE: ${ML_MODEL_LINEAGE:-fm-ml-6.1-exp-v1}
 
     ports:
       - "8000:8000"
@@ -170,6 +171,7 @@ services:
 
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fleetmind:fleetmind@postgres:5432/fleetmind}
+      ML_MODEL_LINEAGE: ${ML_MODEL_LINEAGE:-fm-ml-6.1-exp-v1}
 
       ML_FAILURE_HORIZON_MILES: ${ML_FAILURE_HORIZON_MILES:-2500}
       ML_WINDOW_SIZE: ${ML_WINDOW_SIZE:-12}
