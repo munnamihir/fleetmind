@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from app.diagnostics import router as diagnostics_router
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,8 @@ from fleetmind_common.reliability import (
 )
 
 app = FastAPI(title="FleetMind API", version="0.6.0")
+
+app.include_router(diagnostics_router)
 
 @app.get("/health", tags=["system"])
 def health():

@@ -13,7 +13,7 @@ import joblib
 import numpy as np
 from sqlalchemy import text
 
-from fleetmind_common.db import SessionLocal
+from fleetmind_common.db import Base, SessionLocal, engine
 from fleetmind_common.diagnostic_benchmark_snapshot import (
     load_snapshot as load_diagnostic_snapshot,
     save_snapshot_once as save_diagnostic_snapshot_once,
@@ -30,12 +30,15 @@ from fleetmind_common.diagnostic_dataset import (
     qualify_diagnostic_benchmark,
     split_diagnostic_examples,
 )
-from fleetmind_common.diagnostics import DiagnosticTelemetryPoint
+from fleetmind_common.diagnostic_evidence import observable_evidence
+from fleetmind_common.diagnostic_store import DiagnosticModelRun, DiagnosticPrediction
+from fleetmind_common.diagnostics import DiagnosticTelemetryPoint, extract_diagnostic_features
 from app.diagnostic_models import (
     DIAGNOSTIC_MODEL_LINEAGE,
     TransparentDiagnosticBaseline,
     evaluate_diagnostic_probabilities,
     fit_compare_diagnostic_models,
+    predict_ranked_hypotheses,
 )
 
 logging.basicConfig(
@@ -247,65 +250,53 @@ def active_experiment_id(db) -> str | None:
     ).scalar_one_or_none()
 
 
-def load_active_experiment(db, experiment_id: str):
-    telemetry_rows = db.execute(
+def telemetry_rows_per_vehicle(
+    *,
+    vehicle_count: int,
+    max_total_rows: int = MAX_TELEMETRY_ROWS,
+) -> int:
+    """Allocate the bounded training telemetry budget across vehicles."""
+
+    if vehicle_count < 1:
+        return WINDOW_SIZE
+
+    return max(WINDOW_SIZE, max_total_rows // vehicle_count)
+
+
+def _failure_truth(db, experiment_id: str) -> list[DiagnosticFailureTruth]:
+    failure_rows = db.execute(
         text(
             """
             SELECT
-                timestamp,
                 vehicle_id,
                 experiment_id,
-                mileage,
-                ambient_temp_c,
-                speed_mph,
-                soc_pct,
-                pack_voltage_v,
-                pack_current_a,
-                battery_temp_c,
-                cell_imbalance_v,
-                motor_temp_c,
-                inverter_temp_c,
-                motor_rpm,
-                coolant_temp_c,
-                pump_rpm,
-                pump_current_a
-            FROM (
-                SELECT
-                    id,
-                    timestamp,
-                    vehicle_id,
-                    experiment_id,
-                    mileage,
-                    ambient_temp_c,
-                    speed_mph,
-                    soc_pct,
-                    pack_voltage_v,
-                    pack_current_a,
-                    battery_temp_c,
-                    cell_imbalance_v,
-                    motor_temp_c,
-                    inverter_temp_c,
-                    motor_rpm,
-                    coolant_temp_c,
-                    pump_rpm,
-                    pump_current_a
-                FROM telemetry
-                WHERE experiment_id = :experiment_id
-                ORDER BY id DESC
-                LIMIT :max_rows
-            ) recent
-            ORDER BY vehicle_id, timestamp
+                component,
+                failure_mileage,
+                occurred_at
+            FROM failure_events
+            WHERE experiment_id = :experiment_id
+            ORDER BY occurred_at, vehicle_id
             """
         ),
-        {
-            "experiment_id": experiment_id,
-            "max_rows": MAX_TELEMETRY_ROWS,
-        },
+        {"experiment_id": experiment_id},
     ).mappings().all()
 
+    return [
+        DiagnosticFailureTruth(
+            vehicle_id=row["vehicle_id"],
+            experiment_id=row["experiment_id"],
+            component=row["component"],
+            failure_mileage=float(row["failure_mileage"]),
+            occurred_at=row["occurred_at"],
+        )
+        for row in failure_rows
+    ]
+
+
+def _telemetry_points(rows) -> Dict[str, List[DiagnosticTelemetryPoint]]:
     by_vehicle: Dict[str, List[DiagnosticTelemetryPoint]] = defaultdict(list)
 
-    for row in telemetry_rows:
+    for row in rows:
         point = DiagnosticTelemetryPoint(
             timestamp=row["timestamp"],
             vehicle_id=row["vehicle_id"],
@@ -327,35 +318,175 @@ def load_active_experiment(db, experiment_id: str):
         )
         by_vehicle[point.vehicle_id].append(point)
 
-    failure_rows = db.execute(
+    return by_vehicle
+
+
+def load_active_experiment(db, experiment_id: str):
+    """Load bounded, failure-aware telemetry for training/evaluation."""
+
+    failures = _failure_truth(db, experiment_id)
+
+    vehicle_count = int(
+        db.execute(
+            text(
+                """
+                SELECT COUNT(DISTINCT vehicle_id)
+                FROM telemetry
+                WHERE experiment_id = :experiment_id
+                """
+            ),
+            {"experiment_id": experiment_id},
+        ).scalar_one()
+        or 0
+    )
+
+    per_vehicle_limit = telemetry_rows_per_vehicle(
+        vehicle_count=vehicle_count,
+    )
+
+    rows = db.execute(
         text(
             """
+            WITH failure_cutoffs AS (
+                SELECT
+                    vehicle_id,
+                    occurred_at
+                FROM failure_events
+                WHERE experiment_id = :experiment_id
+            ),
+            ranked AS (
+                SELECT
+                    t.id,
+                    t.timestamp,
+                    t.vehicle_id,
+                    t.experiment_id,
+                    t.mileage,
+                    t.ambient_temp_c,
+                    t.speed_mph,
+                    t.soc_pct,
+                    t.pack_voltage_v,
+                    t.pack_current_a,
+                    t.battery_temp_c,
+                    t.cell_imbalance_v,
+                    t.motor_temp_c,
+                    t.inverter_temp_c,
+                    t.motor_rpm,
+                    t.coolant_temp_c,
+                    t.pump_rpm,
+                    t.pump_current_a,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY t.vehicle_id
+                        ORDER BY t.id DESC
+                    ) AS vehicle_row_number
+                FROM telemetry t
+                LEFT JOIN failure_cutoffs f
+                    ON f.vehicle_id = t.vehicle_id
+                WHERE t.experiment_id = :experiment_id
+                  AND (
+                      f.vehicle_id IS NULL
+                      OR t.timestamp <= f.occurred_at
+                  )
+            )
             SELECT
+                id,
+                timestamp,
                 vehicle_id,
                 experiment_id,
-                component,
-                failure_mileage,
-                occurred_at
-            FROM failure_events
-            WHERE experiment_id = :experiment_id
-            ORDER BY occurred_at, vehicle_id
+                mileage,
+                ambient_temp_c,
+                speed_mph,
+                soc_pct,
+                pack_voltage_v,
+                pack_current_a,
+                battery_temp_c,
+                cell_imbalance_v,
+                motor_temp_c,
+                inverter_temp_c,
+                motor_rpm,
+                coolant_temp_c,
+                pump_rpm,
+                pump_current_a
+            FROM ranked
+            WHERE vehicle_row_number <= :per_vehicle_limit
+            ORDER BY vehicle_id, timestamp, id
             """
         ),
-        {"experiment_id": experiment_id},
+        {
+            "experiment_id": experiment_id,
+            "per_vehicle_limit": per_vehicle_limit,
+        },
     ).mappings().all()
 
-    failures = [
-        DiagnosticFailureTruth(
-            vehicle_id=row["vehicle_id"],
-            experiment_id=row["experiment_id"],
-            component=row["component"],
-            failure_mileage=float(row["failure_mileage"]),
-            occurred_at=row["occurred_at"],
-        )
-        for row in failure_rows
-    ]
+    return _telemetry_points(rows), failures
 
-    return by_vehicle, failures
+
+def load_current_scoring_telemetry(
+    db,
+    experiment_id: str,
+) -> Dict[str, List[DiagnosticTelemetryPoint]]:
+    """Load the latest observable window per vehicle for live inference."""
+
+    rows = db.execute(
+        text(
+            """
+            WITH ranked AS (
+                SELECT
+                    t.id,
+                    t.timestamp,
+                    t.vehicle_id,
+                    t.experiment_id,
+                    t.mileage,
+                    t.ambient_temp_c,
+                    t.speed_mph,
+                    t.soc_pct,
+                    t.pack_voltage_v,
+                    t.pack_current_a,
+                    t.battery_temp_c,
+                    t.cell_imbalance_v,
+                    t.motor_temp_c,
+                    t.inverter_temp_c,
+                    t.motor_rpm,
+                    t.coolant_temp_c,
+                    t.pump_rpm,
+                    t.pump_current_a,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY t.vehicle_id
+                        ORDER BY t.id DESC
+                    ) AS vehicle_row_number
+                FROM telemetry t
+                WHERE t.experiment_id = :experiment_id
+            )
+            SELECT
+                id,
+                timestamp,
+                vehicle_id,
+                experiment_id,
+                mileage,
+                ambient_temp_c,
+                speed_mph,
+                soc_pct,
+                pack_voltage_v,
+                pack_current_a,
+                battery_temp_c,
+                cell_imbalance_v,
+                motor_temp_c,
+                inverter_temp_c,
+                motor_rpm,
+                coolant_temp_c,
+                pump_rpm,
+                pump_current_a
+            FROM ranked
+            WHERE vehicle_row_number <= :window_size
+            ORDER BY vehicle_id, timestamp, id
+            """
+        ),
+        {
+            "experiment_id": experiment_id,
+            "window_size": WINDOW_SIZE,
+        },
+    ).mappings().all()
+
+    return _telemetry_points(rows)
 
 
 def _aligned_probabilities(
@@ -472,6 +603,186 @@ def save_artifacts(
     return artifact_paths
 
 
+
+def latest_scoring_examples(
+    scoring_by_vehicle: Mapping[str, Sequence[DiagnosticTelemetryPoint]],
+    *,
+    experiment_id: str,
+) -> list[DiagnosticExample]:
+    """Create current operational scoring windows without using future labels."""
+
+    examples: list[DiagnosticExample] = []
+
+    for vehicle_id, raw_points in sorted(scoring_by_vehicle.items()):
+        points = sorted(
+            [
+                point
+                for point in raw_points
+                if point.experiment_id == experiment_id
+            ],
+            key=lambda point: point.timestamp,
+        )
+
+        if len(points) < WINDOW_SIZE:
+            continue
+
+        window = points[-WINDOW_SIZE:]
+        anchor = window[-1]
+
+        try:
+            features = extract_diagnostic_features(window)
+        except ValueError:
+            continue
+
+        # The label field is a structural placeholder only. Operational scoring
+        # never reads it; private failure truth is not consulted here.
+        examples.append(
+            DiagnosticExample(
+                vehicle_id=vehicle_id,
+                experiment_id=experiment_id,
+                anchor_timestamp=anchor.timestamp,
+                anchor_mileage=float(anchor.mileage),
+                label="healthy",
+                features=features,
+                miles_to_failure=None,
+            )
+        )
+
+    return examples
+
+
+def _champion_model(
+    champion: str,
+    baseline,
+    logistic,
+    xgboost,
+):
+    models = {
+        "transparent_baseline": baseline,
+        "multinomial_logistic": logistic,
+        "xgboost_multiclass": xgboost,
+    }
+    try:
+        return models[champion]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported diagnostic champion: {champion}"
+        ) from exc
+
+
+def persist_diagnostic_run(
+    *,
+    report: dict,
+    experiment_id: str,
+    scoring_by_vehicle: Mapping[str, Sequence[DiagnosticTelemetryPoint]],
+    baseline=None,
+    logistic=None,
+    xgboost=None,
+    comparison=None,
+) -> int:
+    """Persist API-facing diagnostic status and current vehicle predictions."""
+
+    Base.metadata.create_all(bind=engine)
+
+    artifacts = report.get("artifacts") or {}
+    development = report.get("developmentReadiness") or {}
+    benchmark = report.get("benchmarkQualification") or {}
+    snapshot = report.get("benchmarkSnapshot") or {}
+
+    with SessionLocal() as db:
+        run = DiagnosticModelRun(
+            created_at=datetime.now(timezone.utc),
+            experiment_id=experiment_id,
+            lineage=DIAGNOSTIC_MODEL_LINEAGE,
+            status=str(report.get("status") or "unknown"),
+            champion=(
+                str(report["validation"]["champion"])
+                if isinstance(report.get("validation"), dict)
+                and report["validation"].get("champion")
+                else None
+            ),
+            feature_count=int(report.get("featureCount") or 0),
+            feature_schema_sha256=report.get("featureSchemaSha256"),
+            development_status=str(
+                development.get("status") or "unknown"
+            ),
+            benchmark_status=str(
+                benchmark.get("status") or "unknown"
+            ),
+            snapshot_status=str(
+                snapshot.get("status") or "unknown"
+            ),
+            bundle_path=artifacts.get("bundlePath"),
+            report_path=artifacts.get("reportPath"),
+            report_json=json.dumps(
+                report,
+                sort_keys=True,
+                default=_json_default,
+            ),
+        )
+        db.add(run)
+        db.flush()
+
+        if (
+            report.get("status") == "trained"
+            and comparison is not None
+            and baseline is not None
+            and logistic is not None
+            and xgboost is not None
+        ):
+            scoring_examples = latest_scoring_examples(
+                scoring_by_vehicle,
+                experiment_id=experiment_id,
+            )
+            model = _champion_model(
+                comparison.champion,
+                baseline,
+                logistic,
+                xgboost,
+            )
+            ranked = predict_ranked_hypotheses(
+                model,
+                scoring_examples,
+                feature_names=comparison.feature_names,
+                top_k=3,
+            )
+            generated_at = datetime.now(timezone.utc)
+
+            predictions = []
+            for example, hypotheses in zip(
+                scoring_examples,
+                ranked,
+            ):
+                top = hypotheses[0]
+                predictions.append(
+                    DiagnosticPrediction(
+                        run_id=run.id,
+                        generated_at=generated_at,
+                        experiment_id=experiment_id,
+                        vehicle_id=example.vehicle_id,
+                        anchor_timestamp=example.anchor_timestamp,
+                        anchor_mileage=example.anchor_mileage,
+                        top_class=str(top["class"]),
+                        top_confidence=float(top["confidence"]),
+                        hypotheses_json=json.dumps(
+                            hypotheses,
+                            sort_keys=True,
+                        ),
+                        evidence_json=json.dumps(
+                            observable_evidence(
+                                str(top["class"]),
+                                example.features,
+                            ),
+                            sort_keys=True,
+                        ),
+                    )
+                )
+
+            db.add_all(predictions)
+
+        db.commit()
+        return int(run.id)
+
 def run_once() -> dict:
     with SessionLocal() as db:
         experiment_id = active_experiment_id(db)
@@ -483,6 +794,10 @@ def run_once() -> dict:
             }
 
         by_vehicle, failures = load_active_experiment(
+            db,
+            experiment_id,
+        )
+        scoring_by_vehicle = load_current_scoring_telemetry(
             db,
             experiment_id,
         )
@@ -562,6 +877,21 @@ def run_once() -> dict:
         "source": {
             "telemetryRowsLoaded": telemetry_rows,
             "vehiclesLoaded": len(by_vehicle),
+            "telemetrySampling": {
+                "strategy": "failure_aware_per_vehicle",
+                "maxTotalRowsBudget": MAX_TELEMETRY_ROWS,
+                "rowsPerVehicleBudget": telemetry_rows_per_vehicle(
+                    vehicle_count=len(by_vehicle),
+                ),
+                "failedVehicleCutoff": "at_or_before_failure_timestamp",
+                "healthyVehicleCutoff": "latest_observed",
+            },
+            "operationalScoring": {
+                "strategy": "latest_observable_window_per_vehicle",
+                "windowSize": WINDOW_SIZE,
+                "vehiclesLoaded": len(scoring_by_vehicle),
+                "usesPrivateFailureTruth": False,
+            },
             "failureEventsLoaded": len(failures),
             "failureVehiclesLoaded": len(
                 {failure.vehicle_id for failure in failures}
@@ -625,6 +955,11 @@ def run_once() -> dict:
 
     if development["status"] != "ready":
         report["status"] = "insufficient_development_evidence"
+        report["diagnosticRunId"] = persist_diagnostic_run(
+            report=report,
+            experiment_id=experiment_id,
+            scoring_by_vehicle=scoring_by_vehicle,
+        )
         return report
 
     baseline, logistic, xgboost, comparison = (
@@ -678,6 +1013,28 @@ def run_once() -> dict:
         xgboost=xgboost,
         comparison=comparison,
         report=report,
+    )
+
+    report["diagnosticRunId"] = persist_diagnostic_run(
+        report=report,
+        experiment_id=experiment_id,
+        scoring_by_vehicle=scoring_by_vehicle,
+        baseline=baseline,
+        logistic=logistic,
+        xgboost=xgboost,
+        comparison=comparison,
+    )
+
+    # Persist the final run ID into the report artifact as well.
+    report_path = Path(report["artifacts"]["reportPath"])
+    report_path.write_text(
+        json.dumps(
+            report,
+            indent=2,
+            sort_keys=True,
+            default=_json_default,
+        )
+        + "\n"
     )
 
     return report
