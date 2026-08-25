@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { DiagnosticReplay } from './DiagnosticReplay';
 import { DiagnosticTransitionIntelligence } from './DiagnosticTransitionIntelligence';
+import { DiagnosticEventFeed } from './DiagnosticEventFeed';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
@@ -563,6 +564,12 @@ export function RootCauseDashboard() {
       </section>
 
       <DiagnosticTransitionIntelligence
+        selectedVehicleId={selectedVehicleId}
+        onSelectVehicle={setSelectedVehicleId}
+        runId={status?.runId}
+      />
+
+      <DiagnosticEventFeed
         selectedVehicleId={selectedVehicleId}
         onSelectVehicle={setSelectedVehicleId}
         runId={status?.runId}
