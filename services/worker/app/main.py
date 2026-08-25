@@ -141,16 +141,19 @@ def persist_failure(event: dict) -> None:
     ts = datetime.fromisoformat(event["timestamp"].replace("Z", "+00:00"))
 
     with SessionLocal() as db:
+        experiment_id = event.get("experimentId")
         existing = db.execute(
-            select(FailureEvent).where(FailureEvent.vehicle_id == vehicle["id"])
+            select(FailureEvent).where(
+                FailureEvent.experiment_id == experiment_id,
+                FailureEvent.vehicle_id == vehicle["id"],
+            )
         ).scalar_one_or_none()
 
         if existing is not None:
             new_mileage = float(vehicle["mileage"])
 
             if (
-                existing.experiment_id == event.get("experimentId")
-                and abs(new_mileage - float(existing.failure_mileage)) <= 0.05
+                abs(new_mileage - float(existing.failure_mileage)) <= 0.05
                 and existing.component == event["component"]
                 and existing.failure_mode == event["failureMode"]
             ):
@@ -160,7 +163,6 @@ def persist_failure(event: dict) -> None:
                 return
 
             existing.occurred_at = ts
-            existing.experiment_id = event.get("experimentId")
             existing.model = vehicle["model"]
             existing.factory = vehicle["factory"]
             existing.firmware = vehicle["firmware"]

@@ -8,7 +8,11 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from fleetmind_common.db import SessionLocal
-from fleetmind_common.diagnostic_store import DiagnosticModelRun, DiagnosticPrediction
+from fleetmind_common.diagnostic_store import (
+    DiagnosticModelRun,
+    DiagnosticPrediction,
+    DiagnosticReplayPoint,
+)
 from fleetmind_common.models import Telemetry
 
 
@@ -270,6 +274,81 @@ def diagnostic_incidents(
         }
         for row in rows
     ]
+
+
+@router.get("/vehicles/{vehicle_id}/timeline")
+def vehicle_diagnostic_timeline(
+    vehicle_id: str,
+    limit: int = Query(default=64, ge=1, le=256),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Return observable-only replay points from the current diagnostic run."""
+
+    experiment_id, run = _require_current_run(db)
+    report = _json_object(run.report_json)
+    source = (
+        report.get("source")
+        if isinstance(report.get("source"), dict)
+        else {}
+    )
+    operational = (
+        source.get("operationalScoring")
+        if isinstance(source.get("operationalScoring"), dict)
+        else {}
+    )
+
+    newest_first = db.execute(
+        select(DiagnosticReplayPoint)
+        .where(
+            DiagnosticReplayPoint.run_id == run.id,
+            DiagnosticReplayPoint.vehicle_id == vehicle_id,
+        )
+        .order_by(
+            desc(DiagnosticReplayPoint.anchor_timestamp),
+            desc(DiagnosticReplayPoint.id),
+        )
+        .limit(limit)
+    ).scalars().all()
+
+    rows = list(reversed(newest_first))
+
+    return {
+        "vehicleId": vehicle_id,
+        "experimentId": experiment_id,
+        "runId": run.id,
+        "lineage": run.lineage,
+        "champion": run.champion,
+        "points": [
+            {
+                "anchorTimestamp": row.anchor_timestamp.isoformat(),
+                "anchorMileage": round(float(row.anchor_mileage), 1),
+                "topClass": row.top_class,
+                "topConfidence": round(float(row.top_confidence), 6),
+                "hypotheses": _json_list(row.hypotheses_json),
+                "observableEvidence": _json_list(row.evidence_json),
+            }
+            for row in rows
+        ],
+        "historyPolicy": {
+            "currentRunOnly": True,
+            "exactExperimentOnly": True,
+            "sameLineageOnly": True,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+            "rowsPerVehicle": operational.get("historyRowsPerVehicle"),
+            "strideSamples": operational.get("replayStrideSamples"),
+            "windowSize": operational.get("replayWindowSize"),
+        },
+        "message": (
+            "Replay is derived only from observable telemetry scored by the "
+            "current run champion. Hidden simulator failure markers are not "
+            "queried or exposed."
+            if rows
+            else
+            "No replay points are persisted for this current run. Run the "
+            "Phase 6.6 diagnostic trainer once to populate replay history."
+        ),
+    }
 
 @router.get("/summary")
 def diagnostics_summary(

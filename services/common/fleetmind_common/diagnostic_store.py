@@ -76,3 +76,52 @@ class DiagnosticPrediction(Base):
             "vehicle_id",
         ),
     )
+
+
+class DiagnosticReplayPoint(Base):
+    __tablename__ = "diagnostic_replay_points"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
+    anchor_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+    )
+    anchor_mileage: Mapped[float] = mapped_column(Float)
+    top_class: Mapped[str] = mapped_column(String(64), index=True)
+    top_confidence: Mapped[float] = mapped_column(Float, index=True)
+    hypotheses_json: Mapped[str] = mapped_column(Text)
+    evidence_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "vehicle_id",
+            "anchor_timestamp",
+            name="uq_diagnostic_replay_run_vehicle_anchor",
+        ),
+        Index(
+            "ix_diagnostic_replay_run_vehicle_mileage",
+            "run_id",
+            "vehicle_id",
+            "anchor_mileage",
+        ),
+        Index(
+            "ix_diagnostic_replay_experiment_vehicle",
+            "experiment_id",
+            "vehicle_id",
+        ),
+    )

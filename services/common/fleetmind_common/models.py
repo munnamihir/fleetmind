@@ -58,7 +58,7 @@ class FailureEvent(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     experiment_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    vehicle_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
     model: Mapped[str] = mapped_column(String(32))
     factory: Mapped[str] = mapped_column(String(32), index=True)
     firmware: Mapped[str] = mapped_column(String(32), index=True)
@@ -68,6 +68,14 @@ class FailureEvent(Base):
     failure_mileage: Mapped[float] = mapped_column(Float, index=True)
     fault_code: Mapped[str] = mapped_column(String(32))
     simulation_time_acceleration: Mapped[float] = mapped_column(Float, default=600.0)
+    __table_args__ = (
+        UniqueConstraint(
+            "experiment_id",
+            "vehicle_id",
+            name="uq_failure_events_experiment_vehicle",
+        ),
+    )
+
 
 
 class MLModelRun(Base):
