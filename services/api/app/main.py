@@ -20,6 +20,15 @@ from fleetmind_common.reliability import (
 )
 
 app = FastAPI(title="FleetMind API", version="0.6.0")
+
+@app.get("/health", tags=["system"])
+def health():
+    return {
+        "status": "healthy",
+        "service": "fleetmind-api",
+        "version": app.version,
+    }
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
