@@ -48,6 +48,14 @@
 - [x] Benchmark evidence qualification gate
 - [x] Operational scoring vs benchmark-claim separation
 - [x] Longitudinal per-vehicle prediction history
+- [x] Model-lineage-aware history isolation
+- [x] Simulator mileage-reset / experiment-epoch guard
+- [x] Failure-truth epoch/timestamp continuity guard
+- [x] Automatic exact benchmark snapshot lock after qualification
+- [x] SHA-256 + feature-schema integrity verification for locked benchmark
+- [x] Group-stratified development validation with frozen benchmark membership
+- [x] Minimum 3,000-mile failure-observation warm-up for causal ML windows
+- [x] Duplicate failure-event suppression at identical failure mileage
 - [x] Predictive Maintenance ML dashboard
 - [ ] Survival/RUL model
 - [ ] Time-series model benchmark

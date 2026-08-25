@@ -9,15 +9,28 @@ from pathlib import Path
 
 from sqlalchemy import desc, select
 
+from fleetmind_common.benchmark_snapshot import (
+    feature_schema_hash,
+    load_snapshot,
+    save_snapshot,
+)
 from fleetmind_common.db import Base, SessionLocal, engine
 from fleetmind_common.ml_features import (
     FailureTruth,
+    FrozenBenchmarkSplit,
     TelemetryPoint,
     build_feature_examples,
     latest_feature_examples,
+    sanitize_telemetry_history,
     split_examples_frozen_benchmark,
 )
-from fleetmind_common.models import FailureEvent, MLModelRun, MLPrediction, Telemetry
+from fleetmind_common.models import (
+    FailureEvent,
+    MLBenchmarkSnapshot,
+    MLModelRun,
+    MLPrediction,
+    Telemetry,
+)
 from app.training import (
     examples_to_frame,
     json_dumps,
@@ -42,8 +55,6 @@ MIN_TRAIN_POSITIVES = int(os.getenv("ML_MIN_TRAIN_POSITIVES", "5"))
 MIN_VALIDATION_EXAMPLES = int(os.getenv("ML_MIN_VALIDATION_EXAMPLES", "80"))
 ARTIFACT_DIR = Path(os.getenv("ML_ARTIFACT_DIR", "/artifacts"))
 
-# Phase 5.1 benchmark policy. These defaults intentionally live in the trainer so
-# the upgrade does not require another docker-compose merge.
 BENCHMARK_SEED = int(os.getenv("ML_BENCHMARK_SEED", "20260824"))
 BENCHMARK_FRACTION = float(os.getenv("ML_BENCHMARK_FRACTION", "0.20"))
 VALIDATION_FRACTION = float(os.getenv("ML_VALIDATION_FRACTION", "0.15"))
@@ -53,6 +64,11 @@ MIN_BENCHMARK_POSITIVES = int(os.getenv("ML_MIN_BENCHMARK_POSITIVES", "20"))
 MIN_BENCHMARK_FAILURE_VEHICLES = int(
     os.getenv("ML_MIN_BENCHMARK_FAILURE_VEHICLES", "8")
 )
+
+# A feature-schema or evaluation-protocol change must bump this lineage. Prediction
+# histories and locked benchmark artifacts are never silently joined across lineages.
+MODEL_LINEAGE = os.getenv("ML_MODEL_LINEAGE", "fm-ml-5.2-v1")
+MILEAGE_RESET_DROP_MILES = float(os.getenv("ML_MILEAGE_RESET_DROP_MILES", "50"))
 
 
 def telemetry_point(row: Telemetry) -> TelemetryPoint:
@@ -86,6 +102,12 @@ def load_training_data(db):
         point = telemetry_point(row)
         by_vehicle[point.vehicle_id].append(point)
 
+    # Never allow rolling windows to cross a simulator mileage reset. This also
+    # prevents old experiment epochs from contaminating live scoring.
+    by_vehicle = sanitize_telemetry_history(
+        by_vehicle, reset_drop_miles=MILEAGE_RESET_DROP_MILES
+    )
+
     failure_rows = db.execute(select(FailureEvent)).scalars().all()
     failures = {
         row.vehicle_id: FailureTruth(
@@ -98,7 +120,7 @@ def load_training_data(db):
     return by_vehicle, failures
 
 
-def dataset_summary(split) -> dict:
+def dataset_summary(split: FrozenBenchmarkSplit) -> dict:
     def block(rows):
         return {
             "examples": len(rows),
@@ -156,10 +178,7 @@ def benchmark_qualification(summary: dict) -> dict:
     return {
         "status": "qualified" if not reasons else "insufficient_evidence",
         "requirements": requirements,
-        "observed": {
-            **observed,
-            "bothClassesPresent": both_classes,
-        },
+        "observed": {**observed, "bothClassesPresent": both_classes},
         "reasons": reasons,
         "claimPolicy": (
             "Headline benchmark metrics are publishable only when the frozen benchmark "
@@ -168,27 +187,123 @@ def benchmark_qualification(summary: dict) -> dict:
     }
 
 
-def create_run(db, status: str, summary: dict, notes: str = "") -> MLModelRun:
+def _snapshot_row(db) -> MLBenchmarkSnapshot | None:
+    return db.execute(
+        select(MLBenchmarkSnapshot)
+        .where(
+            MLBenchmarkSnapshot.lineage == MODEL_LINEAGE,
+            MLBenchmarkSnapshot.seed == BENCHMARK_SEED,
+            MLBenchmarkSnapshot.status == "locked",
+        )
+        .order_by(desc(MLBenchmarkSnapshot.created_at), desc(MLBenchmarkSnapshot.id))
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _snapshot_payload(snapshot: MLBenchmarkSnapshot | None, *, accumulating: dict | None = None) -> dict:
+    if snapshot is None:
+        return {
+            "status": "accumulating",
+            "lineage": MODEL_LINEAGE,
+            "seed": BENCHMARK_SEED,
+            "message": "Vehicle membership is frozen; eligible causal windows continue accumulating until the evidence gate qualifies.",
+            "observed": accumulating,
+        }
+    return {
+        "status": "locked",
+        "snapshotId": snapshot.id,
+        "lineage": snapshot.lineage,
+        "seed": snapshot.seed,
+        "createdAt": snapshot.created_at.isoformat(),
+        "examples": snapshot.example_count,
+        "positives": snapshot.positive_count,
+        "vehicles": snapshot.vehicle_count,
+        "failureVehicles": snapshot.failure_vehicle_count,
+        "featureSchemaSha256": snapshot.feature_schema_sha256,
+        "dataSha256": snapshot.data_sha256,
+        "artifactPath": snapshot.artifact_path,
+    }
+
+
+def _load_locked_benchmark(snapshot: MLBenchmarkSnapshot) -> list:
+    examples, integrity = load_snapshot(
+        snapshot.artifact_path, expected_sha256=snapshot.data_sha256
+    )
+    if integrity["featureSchemaSha256"] != snapshot.feature_schema_sha256:
+        raise ValueError(
+            "Locked benchmark feature-schema integrity check failed; "
+            "do not regenerate the snapshot under the same lineage."
+        )
+    return examples
+
+
+def _lock_benchmark(db, benchmark_examples: list, qualification: dict) -> MLBenchmarkSnapshot:
+    artifact_path = (
+        ARTIFACT_DIR
+        / "benchmarks"
+        / f"{MODEL_LINEAGE}-seed-{BENCHMARK_SEED}-v1.json.gz"
+    )
+    metadata = {
+        "lineage": MODEL_LINEAGE,
+        "seed": BENCHMARK_SEED,
+        "benchmarkFraction": BENCHMARK_FRACTION,
+        "horizonMiles": HORIZON_MILES,
+        "windowSize": WINDOW_SIZE,
+        "qualification": qualification,
+        "lockedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    saved = save_snapshot(benchmark_examples, artifact_path, metadata)
+    snapshot = MLBenchmarkSnapshot(
+        created_at=datetime.now(timezone.utc),
+        lineage=MODEL_LINEAGE,
+        seed=BENCHMARK_SEED,
+        benchmark_fraction=BENCHMARK_FRACTION,
+        status="locked",
+        example_count=saved["examples"],
+        positive_count=saved["positives"],
+        vehicle_count=saved["vehicles"],
+        failure_vehicle_count=saved["failureVehicles"],
+        feature_schema_sha256=saved["featureSchemaSha256"],
+        data_sha256=saved["sha256"],
+        artifact_path=saved["artifactPath"],
+        manifest_json=json_dumps(metadata),
+    )
+    db.add(snapshot)
+    db.commit()
+    db.refresh(snapshot)
+    log.info(
+        "locked benchmark snapshot id=%s lineage=%s examples=%s failures=%s sha256=%s",
+        snapshot.id,
+        snapshot.lineage,
+        snapshot.example_count,
+        snapshot.failure_vehicle_count,
+        snapshot.data_sha256[:12],
+    )
+    return snapshot
+
+
+def create_run(db, status: str, summary: dict, snapshot_meta: dict, notes: str = "") -> MLModelRun:
     now = datetime.now(timezone.utc)
     benchmark = summary["benchmark"]
     run = MLModelRun(
         created_at=now,
         completed_at=now if status != "training" else None,
         status=status,
-        algorithm="Sensor-only XGBoost + logistic baseline | frozen benchmark",
+        algorithm=f"XGBoost + logistic | frozen benchmark | {MODEL_LINEAGE}",
         horizon_miles=HORIZON_MILES,
         window_size=WINDOW_SIZE,
         train_examples=summary["train"]["examples"],
         validation_examples=summary["validation"]["examples"],
-        # Existing schema's test_* columns now store the frozen benchmark counts.
         test_examples=benchmark["examples"],
         train_positives=summary["train"]["positives"],
         validation_positives=summary["validation"]["positives"],
         test_positives=benchmark["positives"],
         leakage_policy_json=json_dumps(
             {
+                "modelLineage": MODEL_LINEAGE,
                 "vehicleIsolation": True,
                 "frozenBenchmark": True,
+                "benchmarkSnapshot": snapshot_meta,
                 "benchmarkMembershipDependsOnlyOnVehicleId": True,
                 "benchmarkSeed": BENCHMARK_SEED,
                 "benchmarkFraction": BENCHMARK_FRACTION,
@@ -198,6 +313,12 @@ def create_run(db, status: str, summary: dict, notes: str = "") -> MLModelRun:
                 "benchmarkUsedForFit": False,
                 "benchmarkUsedForCalibration": False,
                 "benchmarkUsedForThresholdSelection": False,
+                "experimentContinuity": {
+                    "latestMileageEpochOnly": True,
+                    "mileageResetDropMiles": MILEAGE_RESET_DROP_MILES,
+                    "failureTruthMustBeAfterAnchorTimestamp": True,
+                    "failureTruthMustBelongToActiveEpoch": True,
+                },
                 "forbiddenInputs": [
                     "vehicle_id",
                     "timestamp",
@@ -248,28 +369,62 @@ def train_once() -> None:
             window_size=WINDOW_SIZE,
             stride=STRIDE,
             max_examples_per_vehicle=MAX_EXAMPLES_PER_VEHICLE,
+            reset_drop_miles=MILEAGE_RESET_DROP_MILES,
         )
-        split = split_examples_frozen_benchmark(
+        evolving_split = split_examples_frozen_benchmark(
             examples,
             seed=BENCHMARK_SEED,
             benchmark_fraction=BENCHMARK_FRACTION,
             validation_fraction=VALIDATION_FRACTION,
             heldout_tail_fraction=HELDOUT_TAIL_FRACTION,
         )
+
+        snapshot = _snapshot_row(db)
+        if snapshot is not None:
+            locked_benchmark = _load_locked_benchmark(snapshot)
+            current_schema = feature_schema_hash(evolving_split.train)
+            if current_schema != snapshot.feature_schema_sha256:
+                raise ValueError(
+                    "Current feature schema differs from the locked benchmark. "
+                    "Bump ML_MODEL_LINEAGE before changing predictive features."
+                )
+            split = FrozenBenchmarkSplit(
+                train=evolving_split.train,
+                validation=evolving_split.validation,
+                benchmark=locked_benchmark,
+                benchmark_fraction=evolving_split.benchmark_fraction,
+                validation_fraction=evolving_split.validation_fraction,
+                heldout_tail_fraction=evolving_split.heldout_tail_fraction,
+            )
+        else:
+            split = evolving_split
+
         summary = dataset_summary(split)
+        snapshot_meta = _snapshot_payload(
+            snapshot,
+            accumulating=(summary["benchmark"] if snapshot is None else None),
+        )
         reason = insufficient_reason(summary)
         if reason:
-            create_run(db, "insufficient_data", summary, reason)
+            create_run(db, "insufficient_data", summary, snapshot_meta, reason)
             log.info("ML waiting: %s | dataset=%s", reason, summary)
             return
 
         qualification = benchmark_qualification(summary)
-        run = create_run(db, "training", summary)
+        if snapshot is None and qualification["status"] == "qualified":
+            snapshot = _lock_benchmark(db, list(split.benchmark), qualification)
+            snapshot_meta = _snapshot_payload(snapshot)
+            # The in-memory benchmark is exactly what was persisted, so this run
+            # is already a valid evaluation against snapshot v1.
+
+        run = create_run(db, "training", summary, snapshot_meta)
         log.info(
-            "training Phase 5.1 run=%s dataset=%s benchmark=%s",
+            "training Phase 5.2 run=%s lineage=%s dataset=%s benchmark=%s snapshot=%s",
             run.id,
+            MODEL_LINEAGE,
             summary,
             qualification["status"],
+            snapshot_meta["status"],
         )
 
         xgboost_model = train_xgboost(split.train, split.validation, split.benchmark)
@@ -281,10 +436,12 @@ def train_once() -> None:
         baseline_artifact = ARTIFACT_DIR / f"fleetmind-logistic-run-{run.id}.joblib"
         metadata = {
             "runId": run.id,
+            "modelLineage": MODEL_LINEAGE,
             "horizonMiles": HORIZON_MILES,
             "windowSize": WINDOW_SIZE,
             "dataset": summary,
             "benchmarkQualification": qualification,
+            "benchmarkSnapshot": snapshot_meta,
             "benchmarkSeed": BENCHMARK_SEED,
         }
         save_artifact(xgboost_model, xgb_artifact, {**metadata, "model": "xgboost"})
@@ -293,7 +450,9 @@ def train_once() -> None:
         )
 
         metrics = dict(xgboost_model.metrics)
+        metrics["modelLineage"] = MODEL_LINEAGE
         metrics["benchmarkQualification"] = qualification
+        metrics["benchmarkSnapshot"] = snapshot_meta
         metrics["baseline"] = {
             "algorithm": "Logistic regression · identical sensor features/cohorts",
             **logistic_model.metrics,
@@ -302,18 +461,23 @@ def train_once() -> None:
             xgboost_model.metrics, logistic_model.metrics
         )
         metrics["benchmarkProtocol"] = {
-            "name": "frozen vehicle benchmark",
+            "name": "locked frozen benchmark" if snapshot else "frozen vehicle cohort",
             "seed": BENCHMARK_SEED,
             "fraction": BENCHMARK_FRACTION,
             "membership": "SHA-256(vehicle_id, fixed seed); label-agnostic and stable across runs",
             "fit": "development train vehicles only",
-            "calibration": "development validation vehicles only",
-            "threshold": "development validation negatives only",
-            "evaluation": "frozen benchmark late-life causal windows only",
+            "calibration": "deterministic group-stratified development validation vehicles only",
+            "threshold": "group-stratified development validation negatives only",
+            "evaluation": (
+                "exact locked benchmark snapshot"
+                if snapshot is not None
+                else "accumulating late-life causal windows from frozen benchmark vehicles"
+            ),
         }
         metrics["operationalScoring"] = {
             "model": "xgboost",
-            "scope": "latest causal window for every active vehicle",
+            "modelLineage": MODEL_LINEAGE,
+            "scope": "latest mileage-continuous causal window for every active vehicle",
             "benchmarkQualificationRequired": False,
         }
 
@@ -323,12 +487,17 @@ def train_once() -> None:
         run.metrics_json = json_dumps(metrics)
         run.calibration_json = json_dumps(xgboost_model.calibration_bins)
         run.feature_importance_json = json_dumps(xgboost_model.feature_importance)
-        run.notes = f"xgboost={xgb_artifact}; baseline={baseline_artifact}"
+        run.notes = (
+            f"xgboost={xgb_artifact}; baseline={baseline_artifact}; "
+            f"lineage={MODEL_LINEAGE}; benchmark={snapshot_meta['status']}"
+        )
         db.commit()
 
-        # Operational scoring stays separate from the benchmark: score one latest
-        # causal window per active vehicle using the XGBoost production candidate.
-        latest = latest_feature_examples(by_vehicle, window_size=WINDOW_SIZE)
+        latest = latest_feature_examples(
+            by_vehicle,
+            window_size=WINDOW_SIZE,
+            reset_drop_miles=MILEAGE_RESET_DROP_MILES,
+        )
         frame, _ = examples_to_frame(latest)
         if not frame.empty:
             probabilities = xgboost_model.predict_proba(frame)
@@ -353,9 +522,11 @@ def train_once() -> None:
             db.commit()
 
         log.info(
-            "ML run=%s complete benchmark=%s XGB PR-AUC=%s baseline PR-AUC=%s recall=%.3f threshold=%.3f predictions=%s",
+            "ML run=%s complete lineage=%s benchmark=%s snapshot=%s XGB PR-AUC=%s baseline PR-AUC=%s recall=%.3f threshold=%.3f predictions=%s",
             run.id,
+            MODEL_LINEAGE,
             qualification["status"],
+            snapshot_meta["status"],
             xgboost_model.metrics.get("prAuc"),
             logistic_model.metrics.get("prAuc"),
             xgboost_model.metrics.get("recall", 0.0),
@@ -375,7 +546,13 @@ def train_once() -> None:
                 }
                 for name in ("train", "validation", "benchmark")
             }
-            create_run(db, "failed", empty, str(exc)[:1000])
+            create_run(
+                db,
+                "failed",
+                empty,
+                {"status": "unknown", "lineage": MODEL_LINEAGE},
+                str(exc)[:1000],
+            )
         except Exception:
             db.rollback()
     finally:
@@ -384,12 +561,14 @@ def train_once() -> None:
 
 def main() -> None:
     log.info(
-        "FleetMind ML trainer starting horizon=%.0fmi window=%s stride=%s interval=%ss frozen-benchmark=%.0f%%",
+        "FleetMind ML trainer starting lineage=%s horizon=%.0fmi window=%s stride=%s interval=%ss frozen-benchmark=%.0f%% continuity-reset=%.0fmi",
+        MODEL_LINEAGE,
         HORIZON_MILES,
         WINDOW_SIZE,
         STRIDE,
         TRAIN_INTERVAL_SECONDS,
         BENCHMARK_FRACTION * 100.0,
+        MILEAGE_RESET_DROP_MILES,
     )
     time.sleep(max(0, STARTUP_DELAY_SECONDS))
     while True:

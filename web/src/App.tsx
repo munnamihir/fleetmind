@@ -207,6 +207,22 @@ type BenchmarkQualification = {
   claimPolicy: string;
 };
 
+type BenchmarkSnapshot = {
+  status: 'accumulating' | 'locked' | 'unknown';
+  snapshotId?: number;
+  lineage?: string;
+  seed?: number;
+  createdAt?: string;
+  examples?: number;
+  positives?: number;
+  vehicles?: number;
+  failureVehicles?: number;
+  featureSchemaSha256?: string;
+  dataSha256?: string;
+  artifactPath?: string;
+  message?: string;
+};
+
 type MLStatus = {
   runId?: number;
   createdAt?: string;
@@ -223,7 +239,9 @@ type MLStatus = {
   };
   decisionThreshold?: number | null;
   metrics?: MLMetrics;
+  modelLineage?: string | null;
   benchmarkQualification?: BenchmarkQualification | null;
+  benchmarkSnapshot?: BenchmarkSnapshot | null;
   baseline?: (MLMetrics & { algorithm?: string }) | null;
   modelDeltaVsBaseline?: {
     rocAuc?: number | null;
@@ -260,8 +278,19 @@ type MLPrediction = {
 
 type MLPredictionHistory = {
   vehicleId: string;
+  modelLineage: string;
+  includeLegacy: boolean;
+  historyPolicy: {
+    sameModelLineageOnly: boolean;
+    latestMileageEpochOnly: boolean;
+    mileageResetDropMiles: number;
+    excludedPriorLineagePoints: number;
+    excludedPriorEpochPoints: number;
+    continuousPlotSafe: boolean;
+  };
   points: Array<{
     modelRunId: number;
+    modelLineage: string;
     generatedAt: string;
     anchorMileage: number;
     probability: number;
@@ -824,6 +853,8 @@ function MLDashboard({ status, predictions }: { status: MLStatus; predictions: M
   const cm = metrics?.confusionMatrix;
   const warning = metrics?.earlyWarning;
   const qualification = status.benchmarkQualification;
+  const snapshot = status.benchmarkSnapshot;
+  const snapshotLocked = snapshot?.status === 'locked';
   const baseline = status.baseline;
   const delta = status.modelDeltaVsBaseline;
   const qualified = qualification?.status === 'qualified';
@@ -852,8 +883,8 @@ function MLDashboard({ status, predictions }: { status: MLStatus; predictions: M
     <>
       <section className="metrics mlMetrics">
         <Metric icon={<BrainCircuit />} label="Model state" value={statusLabel(status.status)} detail={status.algorithm ?? status.message ?? 'trainer warming up'} />
-        <Metric icon={<ShieldCheck />} label="Benchmark" value={qualification == null ? 'LEGACY RUN' : qualified ? 'QUALIFIED' : 'EVIDENCE GATE'} detail={qualification == null ? 'waiting for Phase 5.1 run' : qualified ? 'frozen benchmark meets claim policy' : `${qualification.observed.failureVehicles}/${qualification.requirements.failureVehicles} failure vehicles`} />
-        <Metric icon={<TrendingDown />} label="PR-AUC" value={metrics?.prAuc == null ? '—' : metrics.prAuc.toFixed(3)} detail={`frozen benchmark · base ${formatPct(metrics?.positiveRate)}`} />
+        <Metric icon={<ShieldCheck />} label="Benchmark" value={snapshotLocked ? 'LOCKED' : qualification == null ? 'LEGACY RUN' : qualified ? 'READY TO LOCK' : 'EVIDENCE GATE'} detail={snapshotLocked ? `snapshot ${snapshot?.snapshotId ?? ''} · ${snapshot?.failureVehicles ?? 0} failure vehicles` : qualification == null ? 'waiting for Phase 5.2 run' : `${qualification.observed.failureVehicles}/${qualification.requirements.failureVehicles} failure vehicles`} />
+        <Metric icon={<TrendingDown />} label="PR-AUC" value={metrics?.prAuc == null ? '—' : metrics.prAuc.toFixed(3)} detail={`${snapshotLocked ? 'locked snapshot' : 'accumulating frozen cohort'} · base ${formatPct(metrics?.positiveRate)}`} />
         <Metric icon={<TimerReset />} label="ML warning lead" value={formatMiles(warning?.medianLeadMiles)} detail={warning?.failureVehiclesEvaluated == null ? 'awaiting benchmark failures' : `${warning.failureVehiclesDetected}/${warning.failureVehiclesEvaluated} failure vehicles detected`} />
       </section>
 
@@ -869,10 +900,10 @@ function MLDashboard({ status, predictions }: { status: MLStatus; predictions: M
           <section className="mlHeroGrid">
             <article className="panel mlEvaluationPanel">
               <div className="panelTitleRow">
-                <PanelTitle kicker="FROZEN BENCHMARK" title={`Failure within next ${formatMiles(status.horizonMiles)}`} />
-                <span className="methodBadge">XGBoost · sensor-only · immutable vehicle cohort</span>
+                <PanelTitle kicker={snapshotLocked ? 'LOCKED BENCHMARK SNAPSHOT' : 'FROZEN VEHICLE COHORT'} title={`Failure within next ${formatMiles(status.horizonMiles)}`} />
+                <span className="methodBadge">{status.modelLineage ?? 'legacy'} · XGBoost · sensor-only</span>
               </div>
-              <DatasetStrip dataset={status.dataset!} />
+              <DatasetStrip dataset={status.dataset!} benchmarkLocked={snapshotLocked} />
               <div className="mlScoreGrid">
                 <Parameter label="ROC-AUC" value={metrics?.rocAuc == null ? '—' : metrics.rocAuc.toFixed(3)} note="frozen benchmark" />
                 <Parameter label="Precision" value={formatPct(metrics?.precision)} note="frozen benchmark" />
@@ -882,8 +913,8 @@ function MLDashboard({ status, predictions }: { status: MLStatus; predictions: M
               <div className="mlProtocolNote">
                 <ShieldCheck size={17} />
                 <div>
-                  <b>Benchmark cannot leak back into development</b>
-                  <span>Vehicle membership is determined only by a fixed SHA-256 vehicle-ID hash. Benchmark vehicles are excluded from fit, Platt calibration and threshold selection. Risk score, status, alerts, fault codes, firmware, pump revision and failure truth are excluded from fitted model inputs.</span>
+                  <b>{snapshotLocked ? 'Benchmark data is cryptographically locked' : 'Benchmark cannot leak back into development'}</b>
+                  <span>{snapshotLocked ? 'This lineage now evaluates the exact same persisted feature windows and labels on every run; artifact integrity and feature-schema hashes are verified before training continues.' : 'Vehicle membership is fixed by SHA-256 vehicle-ID hashing while causal windows accumulate. Benchmark vehicles are excluded from fit, calibration and threshold selection until the evidence gate is strong enough to lock an exact snapshot.'}</span>
                 </div>
               </div>
               <div className="thresholdLine"><span>Operational threshold</span><b>{status.decisionThreshold == null ? '—' : status.decisionThreshold.toFixed(4)}</b><small>{metrics?.thresholdPolicy}</small></div>
@@ -893,14 +924,14 @@ function MLDashboard({ status, predictions }: { status: MLStatus; predictions: M
               <PanelTitle kicker="CLAIM POLICY" title={qualified ? 'Benchmark qualified' : 'Insufficient benchmark evidence'} />
               {qualification ? (
                 <>
-                  <div className={`qualificationBadge ${qualified ? 'qualificationGood' : ''}`}>{qualified ? 'PUBLISHABLE BENCHMARK' : 'DO NOT PUBLISH HEADLINE METRICS'}</div>
+                  <div className={`qualificationBadge ${qualified ? 'qualificationGood' : ''}`}>{snapshotLocked ? 'LOCKED PUBLISHABLE SNAPSHOT' : qualified ? 'QUALIFIED · SNAPSHOT WILL LOCK' : 'DO NOT PUBLISH HEADLINE METRICS'}</div>
                   <div className="qualificationRows">
                     <QualificationRow label="Benchmark windows" observed={qualification.observed.examples} required={qualification.requirements.examples} />
                     <QualificationRow label="Positive windows" observed={qualification.observed.positives} required={qualification.requirements.positiveWindows} />
                     <QualificationRow label="Failure vehicles" observed={qualification.observed.failureVehicles} required={qualification.requirements.failureVehicles} />
                   </div>
                   {qualification.reasons.length > 0 && <div className="qualificationReasons">{qualification.reasons.map(reason => <span key={reason}>• {reason}</span>)}</div>}
-                  <p className="muted">Operational predictions continue even when the benchmark evidence gate is not yet satisfied.</p>
+                  <p className="muted">{snapshotLocked ? `Snapshot ${snapshot?.snapshotId ?? ''} is immutable for lineage ${status.modelLineage ?? snapshot?.lineage ?? 'current'}.` : 'Operational predictions continue while frozen-cohort evidence accumulates. Once every requirement passes, FleetMind locks the exact benchmark rows instead of allowing the evaluation set to drift.'}</p>
                 </>
               ) : <div className="empty">The next Phase 5.1 training run will create a frozen benchmark qualification record.</div>}
             </article>
@@ -921,7 +952,7 @@ function MLDashboard({ status, predictions }: { status: MLStatus; predictions: M
             </article>
 
             <article className="panel confusionPanel">
-              <PanelTitle kicker="FROZEN BENCHMARK" title="Confusion matrix" />
+              <PanelTitle kicker={snapshotLocked ? "LOCKED SNAPSHOT" : "FROZEN COHORT"} title="Confusion matrix" />
               {cm ? (
                 <div className="confusionMatrix">
                   <div className="matrixCorner" />
@@ -952,7 +983,7 @@ function MLDashboard({ status, predictions }: { status: MLStatus; predictions: M
             </article>
 
             <article className="panel calibrationPanel">
-              <PanelTitle kicker="PROBABILITY QUALITY" title="Frozen-benchmark calibration" />
+              <PanelTitle kicker="PROBABILITY QUALITY" title={snapshotLocked ? "Locked-snapshot calibration" : "Frozen-cohort calibration"} />
               <CalibrationChart bins={calibration} />
               <p className="muted">Platt calibration is fitted on validation only; these dots are measured on the untouched benchmark.</p>
             </article>
@@ -961,10 +992,10 @@ function MLDashboard({ status, predictions }: { status: MLStatus; predictions: M
           <section className="panel historyPanel">
             <div className="panelTitleRow">
               <PanelTitle kicker="LONGITUDINAL RISK" title={selectedVehicle ? `${selectedVehicle} prediction history` : 'Prediction history'} />
-              <span className="methodBadge">model-run history · operational scoring</span>
+              <span className="methodBadge">{history?.modelLineage ?? status.modelLineage ?? 'lineage pending'} · latest mileage epoch</span>
             </div>
             <PredictionHistoryChart history={history} />
-            <p className="muted">Historical predictions are retained intentionally. This view shows whether risk rises before failure instead of treating prior model-run rows as duplicates.</p>
+            <p className="muted">Only predictions from the current model lineage and latest mileage-continuous experiment epoch are connected. {history?.historyPolicy?.excludedPriorLineagePoints ? `${history.historyPolicy.excludedPriorLineagePoints} legacy-lineage points hidden. ` : ''}{history?.historyPolicy?.excludedPriorEpochPoints ? `${history.historyPolicy.excludedPriorEpochPoints} pre-reset points hidden.` : ''}</p>
           </section>
 
           <section className="panel predictionPanel">
@@ -1001,13 +1032,13 @@ function MLDashboard({ status, predictions }: { status: MLStatus; predictions: M
   );
 }
 
-function DatasetStrip({ dataset }: { dataset: NonNullable<MLStatus['dataset']> }) {
+function DatasetStrip({ dataset, benchmarkLocked = false }: { dataset: NonNullable<MLStatus['dataset']>; benchmarkLocked?: boolean }) {
   const benchmark = dataset.benchmark ?? dataset.test;
   return (
     <div className="datasetStrip">
       <div><span>TRAIN</span><b>{formatNumber(dataset.train.examples)}</b><small>{dataset.train.positives} positive windows</small></div>
       <div><span>VALIDATION</span><b>{formatNumber(dataset.validation.examples)}</b><small>{dataset.validation.positives} positive windows</small></div>
-      <div><span>FROZEN BENCHMARK</span><b>{formatNumber(benchmark.examples)}</b><small>{benchmark.positives} positive windows</small></div>
+      <div><span>{benchmarkLocked ? 'LOCKED SNAPSHOT' : 'FROZEN COHORT'}</span><b>{formatNumber(benchmark.examples)}</b><small>{benchmark.positives} positive windows</small></div>
     </div>
   );
 }

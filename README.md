@@ -24,7 +24,7 @@ eventual fault
 
 FleetMind must infer the problem from telemetry.
 
-## Current milestone: Phase 5.1 predictive-maintenance benchmark hardening
+## Current milestone: Phase 5.2.2 predictive-maintenance split hardening
 
 ```text
 Synthetic fleet ─► Redpanda/Kafka ─► Risk worker ─► PostgreSQL ─► FastAPI ─► React console
@@ -113,6 +113,7 @@ GET /api/v1/ml/benchmark
 GET /api/v1/ml/predictions?limit=25
 GET /api/v1/ml/vehicles/{vehicle_id}
 GET /api/v1/ml/vehicles/{vehicle_id}/history?limit=60
+GET /api/v1/ml/vehicles/{vehicle_id}/history?limit=60&includeLegacy=true  # audit only
 ```
 
 ## Repository
@@ -131,6 +132,7 @@ fleetmind/
 │   │   ├── reliability.py
 │   │   ├── firmware.py
 │   │   ├── ml_features.py
+│   │   ├── benchmark_snapshot.py
 │   │   └── risk.py
 │   ├── api/
 │   ├── worker/
@@ -170,9 +172,9 @@ FleetMind compares `2026.32.4` against `2026.32.1` using coarsened exact matchin
 
 The simulator intentionally uses a larger CP-17 cohort in this demo milestone so a 500-vehicle local run can accumulate enough failures to exercise the statistical workflow. Treat all results as synthetic experiment output, not real Tesla data.
 
-## Predictive maintenance ML v0.5
+## Predictive maintenance ML v0.6
 
-Phase 5.1 predicts whether a coolant-pump failure will occur within the next `ML_FAILURE_HORIZON_MILES` (2,500 miles by default) from rolling telemetry windows while separating operational scoring from benchmark claims. The fitted models are intentionally denied FleetMind's rule-engine outputs: `risk_score`, `status`, alerts, fault codes, vehicle identity and failure-event fields are not model inputs. Firmware/revision/factory/model remain available as display context but are excluded from fit.
+Phase 5.2 predicts whether a coolant-pump failure will occur within the next `ML_FAILURE_HORIZON_MILES` (2,500 miles by default) from rolling telemetry windows while separating operational scoring from benchmark claims. The fitted models are intentionally denied FleetMind's rule-engine outputs: `risk_score`, `status`, alerts, fault codes, vehicle identity and failure-event fields are not model inputs. Firmware/revision/factory/model remain available as display context but are excluded from fit.
 
 Training examples are prospective. Features use telemetry at or before the window anchor; the label asks whether the private failure event occurs after the anchor and within the future mileage horizon. Healthy-looking windows without enough future observed mileage are treated as right-censored and dropped instead of being mislabeled as negatives.
 
@@ -182,6 +184,13 @@ Every complete run evaluates both sensor-only XGBoost and a sensor-only logistic
 
 Historical `ml_predictions` rows are retained intentionally and exposed through the vehicle-history API so the dashboard can visualize longitudinal risk instead of treating older model-run predictions as duplicates. Serialized XGBoost and logistic-regression artifacts are stored in the ML Docker volume.
 
+
+### Phase 5.2 benchmark lineage and experiment continuity
+
+Phase 5.2 turns the frozen vehicle cohort into an exact benchmark snapshot once the evidence gate first qualifies. FleetMind writes the exact feature windows, labels, anchor timestamps and metadata to a gzip JSON artifact in the ML artifact volume, records its SHA-256 and feature-schema hash in `ml_benchmark_snapshots`, and reuses that artifact for every later run in the same model lineage. If the artifact is missing, tampered with, or its feature schema no longer matches, benchmark evaluation fails closed instead of silently rebuilding a different test set. Any intentional predictive feature/protocol change should bump the model lineage.
+
+Operational history is lineage-aware. The vehicle history endpoint hides older model families by default and only connects points from the latest mileage-continuous experiment epoch. Large backward odometer jumps are treated as simulator resets, and rolling windows are never allowed to cross them. Failure truth is usable only when its timestamp and mileage belong to the active telemetry epoch and it occurs after the feature-window anchor. This prevents an old failure row from becoming future truth after a simulator restart. Use `?includeLegacy=true` only for audit/debugging; mixed-lineage history is not safe to draw as one causal trajectory.
+
 See [ROADMAP.md](ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Design goal
@@ -189,3 +198,10 @@ See [ROADMAP.md](ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 FleetMind should feel like software an engineer uses to answer:
 
 > *What is failing, which population is affected, why do we believe it, how early did we know, and what should engineering investigate next?*
+
+
+### Phase 5.2.2 development split and failure warm-up
+
+Benchmark membership remains a deterministic, label-agnostic SHA-256 partition. Inside the non-benchmark development pool, train/validation assignment is now deterministic and group-stratified by causal failure support. This keeps every vehicle in exactly one development partition while preventing calibration from being permanently blocked when all observed development failures happen to hash into train. The benchmark itself remains untouched by this stratification.
+
+The simulator also requires at least 3,000 miles of observation in the current experiment epoch before emitting a coolant-pump failure. This guarantees sufficient pre-failure telemetry for the 12-sample rolling feature window and avoids benchmark failures that occur before any causal feature window can exist. Exact/replayed duplicate failure events at the same mileage are ignored by the worker.

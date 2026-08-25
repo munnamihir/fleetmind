@@ -98,7 +98,44 @@ def persist_failure(event: dict) -> None:
         existing = db.execute(
             select(FailureEvent).where(FailureEvent.vehicle_id == vehicle["id"])
         ).scalar_one_or_none()
+
         if existing is not None:
+            new_mileage = float(vehicle["mileage"])
+            # Exact/replayed failure events can arrive more than once with a
+            # slightly newer timestamp. Do not rewrite or re-log the same
+            # physical failure merely because the message timestamp advanced.
+            if (
+                abs(new_mileage - float(existing.failure_mileage)) <= 0.05
+                and existing.component == event["component"]
+                and existing.failure_mode == event["failureMode"]
+            ):
+                return
+
+            # Vehicle IDs are reused when the synthetic simulator starts a new
+            # experiment epoch. Keep the latest epoch's private failure truth
+            # instead of permanently pinning the vehicle to an older run.
+            # Duplicate/replayed Kafka events are ignored by timestamp.
+            if ts <= existing.occurred_at:
+                return
+            existing.occurred_at = ts
+            existing.model = vehicle["model"]
+            existing.factory = vehicle["factory"]
+            existing.firmware = vehicle["firmware"]
+            existing.component = event["component"]
+            existing.failure_mode = event["failureMode"]
+            existing.pump_revision = vehicle["pumpRevision"]
+            existing.failure_mileage = float(vehicle["mileage"])
+            existing.fault_code = event["faultCode"]
+            existing.simulation_time_acceleration = float(
+                event.get("simulationTimeAcceleration", 600.0)
+            )
+            db.commit()
+            log.info(
+                "refreshed failure truth for new epoch %s %s at %.1f mi",
+                vehicle["id"],
+                vehicle["pumpRevision"],
+                float(vehicle["mileage"]),
+            )
             return
 
         db.add(

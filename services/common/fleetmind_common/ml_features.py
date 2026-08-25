@@ -171,6 +171,69 @@ def assert_no_leakage(features: dict[str, object]) -> None:
         raise ValueError(f"Leakage-prone model features detected: {sorted(leaked)}")
 
 
+def latest_monotonic_segment(
+    raw_points: Sequence[TelemetryPoint],
+    *,
+    reset_drop_miles: float = 50.0,
+) -> list[TelemetryPoint]:
+    """Return only the latest mileage-continuous experiment segment.
+
+    Synthetic simulator restarts can reuse a vehicle ID while resetting its
+    odometer. Windows are never allowed to cross a substantial backward mileage
+    jump because doing so would mix independent experiment epochs.
+    """
+
+    if reset_drop_miles < 0:
+        raise ValueError("reset_drop_miles must be non-negative")
+    points = sorted(raw_points, key=lambda point: point.timestamp)
+    if not points:
+        return []
+    segment_start = 0
+    for index in range(1, len(points)):
+        if points[index - 1].mileage - points[index].mileage > reset_drop_miles:
+            segment_start = index
+    return points[segment_start:]
+
+
+def sanitize_telemetry_history(
+    telemetry_by_vehicle: dict[str, Sequence[TelemetryPoint]],
+    *,
+    reset_drop_miles: float = 50.0,
+) -> dict[str, list[TelemetryPoint]]:
+    """Keep only each vehicle's latest monotonic experiment epoch."""
+
+    return {
+        vehicle_id: latest_monotonic_segment(points, reset_drop_miles=reset_drop_miles)
+        for vehicle_id, points in telemetry_by_vehicle.items()
+    }
+
+
+def failure_applies_to_segment(
+    failure: FailureTruth | None,
+    points: Sequence[TelemetryPoint],
+    *,
+    reset_drop_miles: float = 50.0,
+) -> bool:
+    """Return whether failure truth belongs to the active experiment segment."""
+
+    if failure is None or not points:
+        return False
+    ordered = sorted(points, key=lambda point: point.timestamp)
+    first = ordered[0]
+    last = ordered[-1]
+    if failure.occurred_at < first.timestamp:
+        return False
+    if failure.failure_mileage < min(point.mileage for point in ordered) - reset_drop_miles:
+        return False
+    # A failure far below the current segment's mileage is evidence from an older
+    # simulator epoch even if clocks were altered or replayed.
+    if failure.failure_mileage < first.mileage - reset_drop_miles:
+        return False
+    # Future failure truth may be newer than the latest telemetry row; that is
+    # valid for retrospective training as long as it belongs to this segment.
+    return failure.occurred_at >= first.timestamp and last.timestamp >= first.timestamp
+
+
 def build_feature_examples(
     telemetry_by_vehicle: dict[str, Sequence[TelemetryPoint]],
     failures: dict[str, FailureTruth],
@@ -179,6 +242,7 @@ def build_feature_examples(
     window_size: int = 12,
     stride: int = 4,
     max_examples_per_vehicle: int = 32,
+    reset_drop_miles: float = 50.0,
 ) -> list[FeatureExample]:
     """Build prospective feature windows with right-censoring protection.
 
@@ -199,12 +263,13 @@ def build_feature_examples(
     examples: list[FeatureExample] = []
 
     for vehicle_id, raw_points in telemetry_by_vehicle.items():
-        points = sorted(raw_points, key=lambda point: point.timestamp)
+        points = latest_monotonic_segment(raw_points, reset_drop_miles=reset_drop_miles)
         if len(points) < window_size:
             continue
 
         latest_mileage = max(point.mileage for point in points)
-        failure = failures.get(vehicle_id)
+        candidate_failure = failures.get(vehicle_id)
+        failure = candidate_failure if failure_applies_to_segment(candidate_failure, points, reset_drop_miles=reset_drop_miles) else None
         vehicle_examples: list[FeatureExample] = []
 
         for end in range(window_size - 1, len(points), stride):
@@ -214,8 +279,12 @@ def build_feature_examples(
             label: int
             miles_to_failure: float | None = None
             if failure is not None:
+                # Failure truth must be in the future in both physical mileage and
+                # wall/simulated time. This prevents old failure rows from becoming
+                # labels after a simulator restart or replay.
+                if failure.occurred_at <= anchor.timestamp:
+                    continue
                 miles_to_failure = float(failure.failure_mileage - anchor.mileage)
-                # Post-failure telemetry must never enter training or evaluation.
                 if miles_to_failure <= 0:
                     continue
                 label = 1 if miles_to_failure <= horizon_miles else 0
@@ -407,6 +476,84 @@ def frozen_partition(
     return "train"
 
 
+def _development_validation_ids(
+    by_vehicle: dict[str, list[FeatureExample]],
+    *,
+    seed: int,
+    benchmark_fraction: float,
+    validation_fraction: float,
+) -> set[str]:
+    """Choose a deterministic group-stratified validation cohort.
+
+    Benchmark membership remains purely vehicle-hash based. Within the
+    development pool, validation selection is stratified by whether the vehicle
+    contributes any positive causal window so calibration/threshold selection
+    has outcome support when enough failures exist. All windows from a vehicle
+    remain in exactly one development partition.
+    """
+
+    development_ids = [
+        vehicle_id
+        for vehicle_id in by_vehicle
+        if frozen_partition(
+            vehicle_id,
+            seed=seed,
+            benchmark_fraction=benchmark_fraction,
+            validation_fraction=validation_fraction,
+        )
+        != "benchmark"
+    ]
+    if not development_ids:
+        return set()
+
+    development_validation_fraction = validation_fraction / (1.0 - benchmark_fraction)
+    target_total = max(1, int(round(len(development_ids) * development_validation_fraction)))
+    target_total = min(target_total, max(1, len(development_ids) - 1))
+
+    positive_ids = [
+        vehicle_id
+        for vehicle_id in development_ids
+        if any(example.label == 1 for example in by_vehicle[vehicle_id])
+    ]
+    negative_ids = [vehicle_id for vehicle_id in development_ids if vehicle_id not in set(positive_ids)]
+
+    def stable(ids: list[str], salt: str) -> list[str]:
+        return sorted(
+            ids,
+            key=lambda vehicle_id: hashlib.sha256(
+                f"{salt}:{seed}:{vehicle_id}".encode("utf-8")
+            ).digest(),
+        )
+
+    positive_ids = stable(positive_ids, "validation-positive")
+    negative_ids = stable(negative_ids, "validation-negative")
+
+    positive_target = 0
+    if len(positive_ids) >= 2:
+        positive_target = max(1, int(round(len(positive_ids) * development_validation_fraction)))
+        # Preserve at least one positive vehicle for fitting.
+        positive_target = min(positive_target, len(positive_ids) - 1)
+    elif len(positive_ids) == 1:
+        # Do not strand the only known failure vehicle in validation. The
+        # trainer will correctly remain insufficient until another failure
+        # vehicle exists.
+        positive_target = 0
+
+    negative_target = max(0, target_total - positive_target)
+    negative_target = min(negative_target, len(negative_ids))
+
+    chosen = set(positive_ids[:positive_target]) | set(negative_ids[:negative_target])
+
+    # If the negative pool was too small, fill any remaining validation slots
+    # from additional positive vehicles while still keeping one positive in train.
+    remaining = target_total - len(chosen)
+    if remaining > 0 and len(positive_ids) - positive_target > 1:
+        extra_cap = max(0, len(positive_ids) - positive_target - 1)
+        chosen.update(positive_ids[positive_target:positive_target + min(remaining, extra_cap)])
+
+    return chosen
+
+
 def split_examples_frozen_benchmark(
     examples: Iterable[FeatureExample],
     *,
@@ -415,10 +562,13 @@ def split_examples_frozen_benchmark(
     validation_fraction: float = 0.15,
     heldout_tail_fraction: float = 0.75,
 ) -> FrozenBenchmarkSplit:
-    """Create a frozen, vehicle-isolated benchmark split.
+    """Create a frozen benchmark plus outcome-supported development split.
 
-    * Train vehicles are used for fitting.
-    * Validation vehicles are used for calibration and threshold selection.
+    * Benchmark membership depends only on vehicle ID + fixed seed.
+    * Train/validation remain vehicle-disjoint.
+    * Development validation is deterministically group-stratified by observed
+      causal outcome support so calibration does not fail merely because all
+      development failures hashed into train.
     * Benchmark vehicles are never used by fit/calibration/threshold selection.
 
     Validation and benchmark evaluation use only the latest eligible portion of
@@ -435,27 +585,36 @@ def split_examples_frozen_benchmark(
     for example in rows:
         by_vehicle.setdefault(example.vehicle_id, []).append(example)
 
+    validation_ids = _development_validation_ids(
+        by_vehicle,
+        seed=seed,
+        benchmark_fraction=benchmark_fraction,
+        validation_fraction=validation_fraction,
+    )
+
     train: list[FeatureExample] = []
     validation: list[FeatureExample] = []
     benchmark: list[FeatureExample] = []
 
     for vehicle_id, vehicle_rows in by_vehicle.items():
         ordered = sorted(vehicle_rows, key=lambda example: example.anchor_timestamp)
-        partition = frozen_partition(
+        fixed_partition = frozen_partition(
             vehicle_id,
             seed=seed,
             benchmark_fraction=benchmark_fraction,
             validation_fraction=validation_fraction,
         )
-        if partition == "train":
-            train.extend(ordered)
+
+        if fixed_partition == "benchmark":
+            keep = max(1, int(math.ceil(len(ordered) * heldout_tail_fraction)))
+            benchmark.extend(ordered[-keep:])
             continue
 
-        keep = max(1, int(math.ceil(len(ordered) * heldout_tail_fraction)))
-        if partition == "validation":
+        if vehicle_id in validation_ids:
+            keep = max(1, int(math.ceil(len(ordered) * heldout_tail_fraction)))
             validation.extend(ordered[-keep:])
         else:
-            benchmark.extend(ordered[-keep:])
+            train.extend(ordered)
 
     return FrozenBenchmarkSplit(
         sorted(train, key=lambda example: example.anchor_timestamp),
@@ -466,16 +625,18 @@ def split_examples_frozen_benchmark(
         heldout_tail_fraction,
     )
 
+
 def latest_feature_examples(
     telemetry_by_vehicle: dict[str, Sequence[TelemetryPoint]],
     *,
     window_size: int = 12,
+    reset_drop_miles: float = 50.0,
 ) -> list[FeatureExample]:
     """Build one unlabeled latest feature window per vehicle for live scoring."""
 
     rows: list[FeatureExample] = []
     for vehicle_id, raw_points in telemetry_by_vehicle.items():
-        points = sorted(raw_points, key=lambda point: point.timestamp)
+        points = latest_monotonic_segment(raw_points, reset_drop_miles=reset_drop_miles)
         if len(points) < window_size:
             continue
         window = points[-window_size:]
