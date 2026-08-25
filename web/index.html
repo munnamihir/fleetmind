@@ -3,10 +3,635 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#08090b" />
+    <meta name="theme-color" content="#050607" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <title>FleetMind // Reliability Intelligence</title>
+
+    <style>
+      html,
+      body {
+        background: #050607;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      #fleetmind-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background:
+          radial-gradient(
+            circle at 50% 48%,
+            rgba(34, 44, 51, 0.38) 0,
+            rgba(12, 15, 18, 0.16) 22%,
+            rgba(5, 6, 7, 0) 46%
+          ),
+          linear-gradient(
+            180deg,
+            #050607 0%,
+            #080a0c 46%,
+            #050607 100%
+          );
+        opacity: 1;
+        visibility: visible;
+        transition:
+          opacity 520ms cubic-bezier(0.22, 1, 0.36, 1),
+          visibility 520ms ease;
+      }
+
+      #fleetmind-splash::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.14;
+        background:
+          repeating-linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.025) 0,
+            rgba(255, 255, 255, 0.025) 1px,
+            transparent 1px,
+            transparent 4px
+          );
+        mix-blend-mode: screen;
+      }
+
+      #fleetmind-splash::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: -28%;
+        height: 34%;
+        pointer-events: none;
+        opacity: 0;
+        background:
+          linear-gradient(
+            180deg,
+            transparent 0%,
+            rgba(150, 255, 190, 0.015) 44%,
+            rgba(150, 255, 190, 0.08) 50%,
+            rgba(150, 255, 190, 0.018) 56%,
+            transparent 100%
+          );
+        animation:
+          fleetmind-scanline 2.9s cubic-bezier(0.4, 0, 0.2, 1) 0.35s 1;
+      }
+
+      #fleetmind-splash.fleetmind-splash--leaving {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .fleetmind-splash__content {
+        position: relative;
+        display: grid;
+        justify-items: center;
+        gap: 19px;
+        transform:
+          translateY(-2vh)
+          scale(0.94);
+        opacity: 0;
+        animation:
+          fleetmind-content-arrive 980ms
+          cubic-bezier(0.16, 1, 0.3, 1)
+          120ms
+          forwards;
+      }
+
+      .fleetmind-splash__content::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 68px;
+        width: min(56vw, 480px);
+        height: 1px;
+        transform:
+          translateX(-50%)
+          scaleX(0);
+        transform-origin: center;
+        opacity: 0;
+        background:
+          linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(74, 222, 128, 0.05) 16%,
+            rgba(74, 222, 128, 0.34) 49%,
+            rgba(74, 222, 128, 0.05) 84%,
+            transparent 100%
+          );
+        animation:
+          fleetmind-horizon-reveal 1.35s
+          cubic-bezier(0.16, 1, 0.3, 1)
+          440ms
+          forwards;
+      }
+
+      .fleetmind-splash__mark {
+        position: relative;
+        width: 168px;
+        height: 168px;
+        isolation: isolate;
+      }
+
+      .fleetmind-splash__icon,
+      .fleetmind-splash__graph {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .fleetmind-splash__icon {
+        z-index: 1;
+        opacity: 0;
+        transform: scale(0.82);
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        filter:
+          brightness(0.64)
+          contrast(1.08);
+        animation:
+          fleetmind-icon-reveal 980ms
+          cubic-bezier(0.16, 1, 0.3, 1)
+          200ms
+          forwards;
+      }
+
+      .fleetmind-splash__graph {
+        z-index: 3;
+        overflow: visible;
+        opacity: 0;
+        transform-origin: 50% 58%;
+        animation:
+          fleetmind-graph-awaken 1.25s
+            cubic-bezier(0.16, 1, 0.3, 1)
+            420ms
+            1
+            forwards,
+          fleetmind-graph-pulse 1.68s
+            cubic-bezier(0.22, 1, 0.36, 1)
+            1.38s
+            infinite;
+      }
+
+      .fleetmind-splash__halo {
+        position: absolute;
+        inset: 25px;
+        z-index: 0;
+        border-radius: 50%;
+        opacity: 0;
+        background:
+          radial-gradient(
+            circle,
+            rgba(74, 222, 128, 0.17) 0%,
+            rgba(74, 222, 128, 0.055) 36%,
+            rgba(74, 222, 128, 0) 72%
+          );
+        filter: blur(12px);
+        transform: scale(0.72);
+        animation:
+          fleetmind-halo-awaken 1.18s
+          cubic-bezier(0.16, 1, 0.3, 1)
+          470ms
+          forwards;
+      }
+
+      .fleetmind-splash__ring {
+        position: absolute;
+        inset: 41px;
+        z-index: 2;
+        border: 1px solid rgba(74, 222, 128, 0.12);
+        border-radius: 50%;
+        opacity: 0;
+        transform: scale(0.56);
+        animation:
+          fleetmind-ring-expand 1.18s
+          cubic-bezier(0.16, 1, 0.3, 1)
+          500ms
+          forwards;
+      }
+
+      .fleetmind-splash__wordmark {
+        position: relative;
+        color: #edf2f5;
+        opacity: 0;
+        transform: translateY(7px);
+        font-family:
+          ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Monaco,
+          Consolas,
+          "Liberation Mono",
+          monospace;
+        font-size: 14px;
+        font-weight: 680;
+        letter-spacing: 0.42em;
+        text-indent: 0.42em;
+        text-shadow:
+          0 0 14px rgba(255, 255, 255, 0.04);
+        animation:
+          fleetmind-type-reveal 760ms
+          cubic-bezier(0.16, 1, 0.3, 1)
+          620ms
+          forwards;
+      }
+
+      .fleetmind-splash__caption {
+        margin-top: -10px;
+        color: #5d686f;
+        opacity: 0;
+        transform: translateY(5px);
+        font-family:
+          ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Monaco,
+          Consolas,
+          "Liberation Mono",
+          monospace;
+        font-size: 8px;
+        letter-spacing: 0.24em;
+        text-indent: 0.24em;
+        animation:
+          fleetmind-type-reveal 740ms
+          cubic-bezier(0.16, 1, 0.3, 1)
+          760ms
+          forwards;
+      }
+
+      .fleetmind-splash__status {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 1px;
+        color: #3f484e;
+        opacity: 0;
+        font-family:
+          ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Monaco,
+          Consolas,
+          "Liberation Mono",
+          monospace;
+        font-size: 7px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        animation:
+          fleetmind-status-reveal 620ms ease 920ms forwards;
+      }
+
+      .fleetmind-splash__status-dot {
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: #4ade80;
+        box-shadow:
+          0 0 5px rgba(74, 222, 128, 0.52);
+        animation:
+          fleetmind-status-dot 1.68s
+          cubic-bezier(0.22, 1, 0.36, 1)
+          1.38s
+          infinite;
+      }
+
+      @keyframes fleetmind-content-arrive {
+        from {
+          opacity: 0;
+          transform:
+            translateY(calc(-2vh + 12px))
+            scale(0.94);
+        }
+
+        to {
+          opacity: 1;
+          transform:
+            translateY(-2vh)
+            scale(1);
+        }
+      }
+
+      @keyframes fleetmind-icon-reveal {
+        0% {
+          opacity: 0;
+          transform: scale(0.82);
+          filter:
+            brightness(0.28)
+            contrast(1.12)
+            blur(2px);
+        }
+
+        65% {
+          opacity: 1;
+          transform: scale(1.02);
+          filter:
+            brightness(0.82)
+            contrast(1.08)
+            blur(0);
+        }
+
+        100% {
+          opacity: 0.96;
+          transform: scale(1);
+          filter:
+            brightness(0.74)
+            contrast(1.08);
+        }
+      }
+
+      @keyframes fleetmind-graph-awaken {
+        0% {
+          opacity: 0;
+          transform: scale(0.88);
+          filter:
+            drop-shadow(0 0 0 rgba(74, 222, 128, 0));
+        }
+
+        48% {
+          opacity: 1;
+          transform: scale(1.075);
+          filter:
+            drop-shadow(0 0 5px rgba(74, 222, 128, 0.68))
+            drop-shadow(0 0 18px rgba(74, 222, 128, 0.32));
+        }
+
+        72% {
+          opacity: 0.72;
+          transform: scale(0.995);
+        }
+
+        100% {
+          opacity: 0.9;
+          transform: scale(1);
+          filter:
+            drop-shadow(0 0 3px rgba(74, 222, 128, 0.32))
+            drop-shadow(0 0 9px rgba(74, 222, 128, 0.14));
+        }
+      }
+
+      @keyframes fleetmind-graph-pulse {
+        0%,
+        39%,
+        100% {
+          opacity: 0.62;
+          transform: scale(1);
+          filter:
+            drop-shadow(0 0 2px rgba(74, 222, 128, 0.2))
+            drop-shadow(0 0 6px rgba(74, 222, 128, 0.08));
+        }
+
+        7% {
+          opacity: 1;
+          transform: scale(1.07);
+          filter:
+            drop-shadow(0 0 5px rgba(74, 222, 128, 0.72))
+            drop-shadow(0 0 16px rgba(74, 222, 128, 0.4))
+            drop-shadow(0 0 28px rgba(74, 222, 128, 0.16));
+        }
+
+        14% {
+          opacity: 0.66;
+          transform: scale(1.006);
+        }
+
+        21% {
+          opacity: 0.98;
+          transform: scale(1.04);
+          filter:
+            drop-shadow(0 0 4px rgba(74, 222, 128, 0.56))
+            drop-shadow(0 0 12px rgba(74, 222, 128, 0.28));
+        }
+
+        30% {
+          opacity: 0.58;
+          transform: scale(1);
+        }
+      }
+
+      @keyframes fleetmind-halo-awaken {
+        0% {
+          opacity: 0;
+          transform: scale(0.72);
+        }
+
+        58% {
+          opacity: 0.74;
+          transform: scale(1.08);
+        }
+
+        100% {
+          opacity: 0.22;
+          transform: scale(1);
+        }
+      }
+
+      @keyframes fleetmind-ring-expand {
+        0% {
+          opacity: 0;
+          transform: scale(0.56);
+        }
+
+        44% {
+          opacity: 0.52;
+        }
+
+        100% {
+          opacity: 0;
+          transform: scale(1.7);
+        }
+      }
+
+      @keyframes fleetmind-horizon-reveal {
+        0% {
+          opacity: 0;
+          transform:
+            translateX(-50%)
+            scaleX(0);
+        }
+
+        55% {
+          opacity: 0.8;
+        }
+
+        100% {
+          opacity: 0.18;
+          transform:
+            translateX(-50%)
+            scaleX(1);
+        }
+      }
+
+      @keyframes fleetmind-type-reveal {
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes fleetmind-status-reveal {
+        to {
+          opacity: 1;
+        }
+      }
+
+      @keyframes fleetmind-status-dot {
+        0%,
+        39%,
+        100% {
+          opacity: 0.46;
+          transform: scale(0.9);
+        }
+
+        7% {
+          opacity: 1;
+          transform: scale(1.65);
+        }
+
+        21% {
+          opacity: 0.88;
+          transform: scale(1.28);
+        }
+      }
+
+      @keyframes fleetmind-scanline {
+        0% {
+          top: -28%;
+          opacity: 0;
+        }
+
+        12% {
+          opacity: 0.46;
+        }
+
+        78% {
+          opacity: 0.22;
+        }
+
+        100% {
+          top: 108%;
+          opacity: 0;
+        }
+      }
+
+      @media (max-width: 520px) {
+        .fleetmind-splash__mark {
+          width: 138px;
+          height: 138px;
+        }
+
+        .fleetmind-splash__wordmark {
+          font-size: 12px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #fleetmind-splash {
+          transition-duration: 100ms;
+        }
+
+        #fleetmind-splash::after,
+        .fleetmind-splash__content,
+        .fleetmind-splash__content::before,
+        .fleetmind-splash__icon,
+        .fleetmind-splash__graph,
+        .fleetmind-splash__halo,
+        .fleetmind-splash__ring,
+        .fleetmind-splash__wordmark,
+        .fleetmind-splash__caption,
+        .fleetmind-splash__status,
+        .fleetmind-splash__status-dot {
+          animation: none !important;
+        }
+
+        .fleetmind-splash__content,
+        .fleetmind-splash__icon,
+        .fleetmind-splash__graph,
+        .fleetmind-splash__wordmark,
+        .fleetmind-splash__caption,
+        .fleetmind-splash__status {
+          opacity: 1;
+          transform: none;
+        }
+
+        .fleetmind-splash__halo {
+          opacity: 0.16;
+          transform: none;
+        }
+      }
+    </style>
   </head>
+
   <body>
+    <div
+      id="fleetmind-splash"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading FleetMind Reliability Intelligence"
+    >
+      <div class="fleetmind-splash__content">
+        <div class="fleetmind-splash__mark" aria-hidden="true">
+          <span class="fleetmind-splash__halo"></span>
+          <span class="fleetmind-splash__ring"></span>
+
+          <img
+            class="fleetmind-splash__icon"
+            src="/favicon.ico"
+            alt=""
+            width="168"
+            height="168"
+          />
+
+          <svg
+            class="fleetmind-splash__graph"
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <g fill="#4ade80">
+              <rect x="8" y="6" width="1" height="1" />
+              <rect x="8" y="7" width="1" height="1" />
+              <rect x="9" y="7" width="1" height="1" />
+              <rect x="6" y="8" width="1" height="1" />
+              <rect x="8" y="8" width="1" height="1" />
+              <rect x="9" y="8" width="1" height="1" />
+              <rect x="5" y="9" width="1" height="1" />
+              <rect x="6" y="9" width="1" height="1" />
+              <rect x="8" y="9" width="1" height="1" />
+              <rect x="10" y="9" width="1" height="1" />
+              <rect x="11" y="9" width="1" height="1" />
+              <rect x="12" y="9" width="1" height="1" />
+              <rect x="13" y="9" width="1" height="1" />
+              <rect x="2" y="10" width="1" height="1" />
+              <rect x="3" y="10" width="1" height="1" />
+              <rect x="4" y="10" width="1" height="1" />
+              <rect x="7" y="10" width="1" height="1" />
+              <rect x="7" y="11" width="1" height="1" />
+              <rect x="7" y="12" width="1" height="1" />
+            </g>
+          </svg>
+        </div>
+
+        <div class="fleetmind-splash__wordmark">FLEETMIND</div>
+
+        <div class="fleetmind-splash__caption">
+          RELIABILITY INTELLIGENCE
+        </div>
+
+        <div class="fleetmind-splash__status" aria-hidden="true">
+          <span class="fleetmind-splash__status-dot"></span>
+          SYSTEM INITIALIZING
+        </div>
+      </div>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
