@@ -22,6 +22,16 @@ router = APIRouter(
 )
 
 
+# Phase 6.7 operational transition heuristics.
+# Declared before transition results are observed. These are not calibrated
+# failure-risk thresholds and must not be described as failure ground truth.
+TRANSITION_RECENT_POINTS = 5
+TRANSITION_ESCALATION_PER_1K_MILES = 0.01
+TRANSITION_STABLE_FRACTION = 0.80
+TRANSITION_VOLATILE_FRACTION = 0.60
+TRANSITION_VOLATILE_CLASS_CHANGES = 3
+
+
 def db_session():
     db = SessionLocal()
     try:
@@ -348,6 +358,302 @@ def vehicle_diagnostic_timeline(
             "No replay points are persisted for this current run. Run the "
             "Phase 6.6 diagnostic trainer once to populate replay history."
         ),
+    }
+
+
+def _hypothesis_confidence(
+    row: DiagnosticReplayPoint,
+    target_class: str,
+) -> float:
+    for hypothesis in _json_list(row.hypotheses_json):
+        if (
+            isinstance(hypothesis, dict)
+            and hypothesis.get("class") == target_class
+        ):
+            try:
+                return float(hypothesis.get("confidence") or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def _transition_record(
+    rows: list[DiagnosticReplayPoint],
+    *,
+    experiment_id: str,
+    run_id: int,
+    incident_confidence: float,
+) -> dict | None:
+    if len(rows) < 2:
+        return None
+
+    rows = sorted(
+        rows,
+        key=lambda row: (row.anchor_timestamp, row.id),
+    )
+    latest = rows[-1]
+    first = rows[0]
+    recent = rows[-TRANSITION_RECENT_POINTS:]
+    latest_class = latest.top_class
+
+    class_changes = sum(
+        1
+        for previous, current in zip(rows, rows[1:])
+        if previous.top_class != current.top_class
+    )
+    recent_class_changes = sum(
+        1
+        for previous, current in zip(recent, recent[1:])
+        if previous.top_class != current.top_class
+    )
+
+    recent_stability = (
+        sum(1 for row in recent if row.top_class == latest_class)
+        / len(recent)
+    )
+
+    start_current_class_confidence = _hypothesis_confidence(
+        recent[0],
+        latest_class,
+    )
+    latest_current_class_confidence = _hypothesis_confidence(
+        latest,
+        latest_class,
+    )
+    confidence_delta = (
+        latest_current_class_confidence
+        - start_current_class_confidence
+    )
+
+    mileage_delta = max(
+        0.0,
+        float(latest.anchor_mileage)
+        - float(recent[0].anchor_mileage),
+    )
+    slope_per_1k = (
+        confidence_delta / mileage_delta * 1000.0
+        if mileage_delta > 0.0
+        else 0.0
+    )
+
+    newly_emerging = (
+        latest_class != "healthy"
+        and rows[-2].top_class == "healthy"
+        and float(latest.top_confidence) >= incident_confidence
+    )
+
+    emergence_points = [
+        current
+        for previous, current in zip(rows, rows[1:])
+        if (
+            previous.top_class == "healthy"
+            and current.top_class != "healthy"
+            and float(current.top_confidence) >= incident_confidence
+        )
+    ]
+    first_emergence = emergence_points[0] if emergence_points else None
+    emergence_observed = first_emergence is not None
+    escalating = (
+        latest_class != "healthy"
+        and float(latest.top_confidence) >= incident_confidence
+        and slope_per_1k >= TRANSITION_ESCALATION_PER_1K_MILES
+    )
+    deescalating = (
+        latest_class != "healthy"
+        and slope_per_1k <= -TRANSITION_ESCALATION_PER_1K_MILES
+    )
+    volatile = (
+        recent_stability < TRANSITION_VOLATILE_FRACTION
+        or class_changes >= TRANSITION_VOLATILE_CLASS_CHANGES
+    )
+    persistent = (
+        latest_class != "healthy"
+        and float(latest.top_confidence) >= incident_confidence
+        and recent_stability >= TRANSITION_STABLE_FRACTION
+    )
+
+    if newly_emerging:
+        attention_tier = "emerging"
+        attention_reason = "healthy → non-healthy at latest anchor"
+        sort_rank = 5
+    elif escalating:
+        attention_tier = "escalating"
+        attention_reason = "current-class confidence is rising"
+        sort_rank = 4
+    elif volatile and latest_class != "healthy":
+        attention_tier = "volatile"
+        attention_reason = "top hypothesis is changing"
+        sort_rank = 3
+    elif persistent:
+        attention_tier = "persistent"
+        attention_reason = "high-confidence class is stable"
+        sort_rank = 2
+    elif latest_class != "healthy":
+        attention_tier = "monitor"
+        attention_reason = "current non-healthy hypothesis"
+        sort_rank = 1
+    else:
+        attention_tier = "stable"
+        attention_reason = "current top hypothesis is healthy"
+        sort_rank = 0
+
+    return {
+        "vehicleId": latest.vehicle_id,
+        "experimentId": experiment_id,
+        "runId": run_id,
+        "latestClass": latest_class,
+        "latestConfidence": round(float(latest.top_confidence), 6),
+        "latestAnchorMileage": round(float(latest.anchor_mileage), 1),
+        "firstClass": first.top_class,
+        "firstAnchorMileage": round(float(first.anchor_mileage), 1),
+        "classChanges": class_changes,
+        "recentClassChanges": recent_class_changes,
+        "recentStability": round(float(recent_stability), 6),
+        "currentClassConfidenceSlopePer1kMiles": round(float(slope_per_1k), 8),
+        "currentClassConfidenceDelta": round(float(confidence_delta), 8),
+        "newlyEmerging": newly_emerging,
+        "emergenceObserved": emergence_observed,
+        "firstEmergenceClass": (
+            first_emergence.top_class
+            if first_emergence is not None
+            else None
+        ),
+        "firstEmergenceMileage": (
+            round(float(first_emergence.anchor_mileage), 1)
+            if first_emergence is not None
+            else None
+        ),
+        "milesSinceEmergence": (
+            round(
+                float(latest.anchor_mileage)
+                - float(first_emergence.anchor_mileage),
+                1,
+            )
+            if first_emergence is not None
+            else None
+        ),
+        "historicalTransitions": class_changes > 0,
+        "escalating": escalating,
+        "deescalating": deescalating,
+        "volatile": volatile,
+        "persistent": persistent,
+        "attentionTier": attention_tier,
+        "attentionReason": attention_reason,
+        "_sortRank": sort_rank,
+    }
+
+
+@router.get("/transitions")
+def diagnostic_transitions(
+    limit: int = Query(default=50, ge=1, le=200),
+    min_confidence: float = Query(default=0.70, ge=0.0, le=1.0),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Summarize current-run changes in observable diagnostic hypotheses."""
+
+    experiment_id, run = _require_current_run(db)
+
+    rows = db.execute(
+        select(DiagnosticReplayPoint)
+        .where(DiagnosticReplayPoint.run_id == run.id)
+        .order_by(
+            DiagnosticReplayPoint.vehicle_id,
+            DiagnosticReplayPoint.anchor_timestamp,
+            DiagnosticReplayPoint.id,
+        )
+    ).scalars().all()
+
+    grouped: dict[str, list[DiagnosticReplayPoint]] = {}
+    for row in rows:
+        grouped.setdefault(row.vehicle_id, []).append(row)
+
+    records = []
+    for vehicle_rows in grouped.values():
+        record = _transition_record(
+            vehicle_rows,
+            experiment_id=experiment_id,
+            run_id=run.id,
+            incident_confidence=min_confidence,
+        )
+        if record is not None:
+            records.append(record)
+
+    records.sort(
+        key=lambda item: (
+            int(item["_sortRank"]),
+            float(item["latestConfidence"]),
+            float(item["recentStability"]),
+            float(item["currentClassConfidenceSlopePer1kMiles"]),
+        ),
+        reverse=True,
+    )
+
+    summary = {
+        "vehiclesAnalyzed": len(records),
+        "currentNonHealthy": sum(
+            1 for item in records if item["latestClass"] != "healthy"
+        ),
+        "newlyEmerging": sum(
+            1 for item in records if item["newlyEmerging"]
+        ),
+        "emergenceObserved": sum(
+            1 for item in records if item["emergenceObserved"]
+        ),
+        "historicalTransitions": sum(
+            1 for item in records if item["historicalTransitions"]
+        ),
+        "escalating": sum(
+            1 for item in records if item["escalating"]
+        ),
+        "deescalating": sum(
+            1 for item in records if item["deescalating"]
+        ),
+        "recentTransitions": sum(
+            1 for item in records if item["recentClassChanges"] > 0
+        ),
+        "volatile": sum(
+            1 for item in records if item["volatile"]
+        ),
+        "persistent": sum(
+            1 for item in records if item["persistent"]
+        ),
+    }
+
+    public_records = []
+    for item in records[:limit]:
+        public_item = dict(item)
+        public_item.pop("_sortRank", None)
+        public_records.append(public_item)
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "champion": run.champion,
+        "thresholds": {
+            "recentWindowPoints": TRANSITION_RECENT_POINTS,
+            "incidentConfidence": min_confidence,
+            "escalationPer1kMiles": TRANSITION_ESCALATION_PER_1K_MILES,
+            "stableFraction": TRANSITION_STABLE_FRACTION,
+            "volatileFraction": TRANSITION_VOLATILE_FRACTION,
+            "volatileClassChanges": TRANSITION_VOLATILE_CLASS_CHANGES,
+        },
+        "summary": summary,
+        "vehicles": public_records,
+        "scopePolicy": {
+            "currentRunOnly": True,
+            "exactExperimentOnly": True,
+            "sameLineageOnly": True,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+        },
+        "interpretationPolicy": (
+            "Transition intelligence is derived only from current-run replayed "
+            "model hypotheses over observable telemetry. Attention tiers are "
+            "operational review heuristics, not calibrated failure risk, "
+            "private failure truth, attribution, or causal proof."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
 
 @router.get("/summary")

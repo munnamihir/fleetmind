@@ -220,8 +220,7 @@ export function DiagnosticReplay({
               <div className="replayChartLegend">
                 <span>Top-class confidence over mileage</span>
                 <small>
-                  {timeline.historyPolicy.rowsPerVehicle ?? '—'} observable rows · stride{' '}
-                  {timeline.historyPolicy.strideSamples ?? '—'} samples
+                  {timeline.points.length} persisted observable anchors · current run
                 </small>
               </div>
 
