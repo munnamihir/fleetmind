@@ -12,6 +12,13 @@ from fleetmind_common.db import SessionLocal
 from fleetmind_common.diagnostic_event_rules import (
     DIAGNOSTIC_EVENT_TYPES,
 )
+from fleetmind_common.diagnostic_pattern_rules import (
+    DEFAULT_CLUSTER_MIN_CASES,
+    MAX_CLUSTER_CASE_IDS,
+    PATTERN_DIMENSIONS,
+    PATTERN_RULES_VERSION,
+    similarity_score,
+)
 from fleetmind_common.diagnostic_case_rules import (
     CASE_ACTIVITY_ASSIGNED,
     CASE_ACTIVITY_NOTE_ADDED,
@@ -27,6 +34,8 @@ from fleetmind_common.diagnostic_episode_rules import (
 from fleetmind_common.diagnostic_store import (
     DiagnosticCase,
     DiagnosticCaseActivity,
+    DiagnosticInvestigationView,
+    DiagnosticWatchlistEntry,
     DiagnosticEpisode,
     DiagnosticEvent,
     DiagnosticModelRun,
@@ -1657,6 +1666,636 @@ def add_diagnostic_case_note(
     db.refresh(activity)
 
     return _diagnostic_case_activity_payload(activity)
+
+
+
+
+class DiagnosticWatchlistCreate(BaseModel):
+    actor: str = Field(default="operator", min_length=1, max_length=64)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class DiagnosticInvestigationViewCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=96)
+    filters: dict = Field(default_factory=dict)
+    actor: str = Field(default="operator", min_length=1, max_length=64)
+
+
+def _latest_case_context_map(
+    db: Session,
+    *,
+    experiment_id: str,
+    cases: list[DiagnosticCase],
+) -> dict[str, dict]:
+    vehicle_ids = sorted({row.vehicle_id for row in cases})
+    if not vehicle_ids:
+        return {}
+
+    latest = (
+        select(
+            Telemetry.vehicle_id,
+            func.max(Telemetry.id).label("max_id"),
+        )
+        .where(
+            Telemetry.experiment_id == experiment_id,
+            Telemetry.vehicle_id.in_(vehicle_ids),
+        )
+        .group_by(Telemetry.vehicle_id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(Telemetry).join(
+            latest,
+            Telemetry.id == latest.c.max_id,
+        )
+    ).scalars().all()
+
+    return {
+        row.vehicle_id: {
+            "model": row.model,
+            "factory": row.factory,
+            "firmware": row.firmware,
+            "pumpRevision": row.pump_revision,
+            "mileage": round(float(row.mileage), 1),
+        }
+        for row in rows
+    }
+
+
+def _pattern_case_record(
+    row: DiagnosticCase,
+    context: dict | None,
+) -> dict:
+    context = context or {}
+    return {
+        "caseId": row.id,
+        "episodeId": row.episode_id,
+        "vehicleId": row.vehicle_id,
+        "hypothesisClass": row.hypothesis_class,
+        "reviewPriority": row.review_priority,
+        "status": row.status,
+        "episodeState": row.episode_state_at_creation,
+        "latestConfidence": (
+            round(float(row.latest_confidence), 6)
+            if row.latest_confidence is not None
+            else None
+        ),
+        "eventCount": int(row.event_count),
+        "model": context.get("model"),
+        "factory": context.get("factory"),
+        "firmware": context.get("firmware"),
+        "pumpRevision": context.get("pumpRevision"),
+        "currentMileage": context.get("mileage"),
+    }
+
+
+def _current_pattern_records(
+    db: Session,
+) -> tuple[str, DiagnosticModelRun, list[dict]]:
+    experiment_id, run = _require_current_run(db)
+    cases = db.execute(
+        select(DiagnosticCase)
+        .where(
+            DiagnosticCase.run_id == run.id,
+            DiagnosticCase.experiment_id == experiment_id,
+        )
+        .order_by(DiagnosticCase.id)
+    ).scalars().all()
+    contexts = _latest_case_context_map(
+        db,
+        experiment_id=experiment_id,
+        cases=cases,
+    )
+    records = [
+        _pattern_case_record(row, contexts.get(row.vehicle_id))
+        for row in cases
+    ]
+    return experiment_id, run, records
+
+
+def _dimension_rows(
+    records: list[dict],
+    key: str,
+) -> list[dict]:
+    grouped: dict[str, list[dict]] = {}
+    for row in records:
+        value = row.get(key)
+        if value is None:
+            continue
+        grouped.setdefault(str(value), []).append(row)
+
+    result = []
+    for value, rows in grouped.items():
+        confidences = [
+            float(row["latestConfidence"])
+            for row in rows
+            if row.get("latestConfidence") is not None
+        ]
+        result.append(
+            {
+                "value": value,
+                "cases": len(rows),
+                "vehicles": len(
+                    {str(row["vehicleId"]) for row in rows}
+                ),
+                "highPriorityCases": sum(
+                    1
+                    for row in rows
+                    if row.get("reviewPriority") == "HIGH"
+                ),
+                "activeCases": sum(
+                    1
+                    for row in rows
+                    if row.get("status") != CASE_CLOSED
+                ),
+                "averageLatestConfidence": (
+                    round(sum(confidences) / len(confidences), 6)
+                    if confidences
+                    else None
+                ),
+            }
+        )
+
+    result.sort(
+        key=lambda item: (
+            int(item["cases"]),
+            int(item["highPriorityCases"]),
+            float(item["averageLatestConfidence"] or 0.0),
+        ),
+        reverse=True,
+    )
+    return result
+
+
+@router.get("/patterns/overview")
+def diagnostic_pattern_overview(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_pattern_records(db)
+
+    dimensions = {
+        dimension: _dimension_rows(records, dimension)
+        for dimension in PATTERN_DIMENSIONS
+    }
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": PATTERN_RULES_VERSION,
+        "totalCases": len(records),
+        "casesWithTelemetryContext": sum(
+            1 for row in records if row.get("firmware") is not None
+        ),
+        "dimensions": dimensions,
+        "topHotspots": [
+            {
+                "dimension": dimension,
+                **rows[0],
+            }
+            for dimension, rows in dimensions.items()
+            if rows
+        ],
+        "scopePolicy": {
+            "currentRunOnly": True,
+            "exactExperimentOnly": True,
+            "caseDerived": True,
+            "observableTelemetryContextOnly": True,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+        },
+        "interpretationPolicy": (
+            "Pattern counts are descriptive groupings of current-run "
+            "diagnostic cases and exact-experiment observable vehicle "
+            "context. Concentration is not enrichment, attribution, "
+            "physical-failure risk, or causal proof."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/patterns/clusters")
+def diagnostic_pattern_clusters(
+    min_cases: int = Query(
+        default=DEFAULT_CLUSTER_MIN_CASES,
+        ge=1,
+        le=100,
+    ),
+    limit: int = Query(default=30, ge=1, le=200),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_pattern_records(db)
+
+    grouped: dict[tuple[str, str, str], list[dict]] = {}
+    for row in records:
+        key = (
+            str(row.get("hypothesisClass") or "unknown"),
+            str(row.get("firmware") or "unknown"),
+            str(row.get("factory") or "unknown"),
+        )
+        grouped.setdefault(key, []).append(row)
+
+    clusters = []
+    for (
+        hypothesis_class,
+        firmware,
+        factory,
+    ), rows in grouped.items():
+        if len(rows) < min_cases:
+            continue
+        confidences = [
+            float(row["latestConfidence"])
+            for row in rows
+            if row.get("latestConfidence") is not None
+        ]
+        clusters.append(
+            {
+                "clusterKey": (
+                    f"{hypothesis_class}|{firmware}|{factory}"
+                ),
+                "hypothesisClass": hypothesis_class,
+                "firmware": firmware,
+                "factory": factory,
+                "cases": len(rows),
+                "vehicles": len(
+                    {str(row["vehicleId"]) for row in rows}
+                ),
+                "highPriorityCases": sum(
+                    1
+                    for row in rows
+                    if row.get("reviewPriority") == "HIGH"
+                ),
+                "averageLatestConfidence": (
+                    round(sum(confidences) / len(confidences), 6)
+                    if confidences
+                    else None
+                ),
+                "pumpRevisions": sorted(
+                    {
+                        str(row["pumpRevision"])
+                        for row in rows
+                        if row.get("pumpRevision") is not None
+                    }
+                ),
+                "models": sorted(
+                    {
+                        str(row["model"])
+                        for row in rows
+                        if row.get("model") is not None
+                    }
+                ),
+                "caseIds": [
+                    int(row["caseId"])
+                    for row in rows[:MAX_CLUSTER_CASE_IDS]
+                ],
+                "vehicleIds": [
+                    str(row["vehicleId"])
+                    for row in rows[:MAX_CLUSTER_CASE_IDS]
+                ],
+            }
+        )
+
+    clusters.sort(
+        key=lambda item: (
+            int(item["cases"]),
+            int(item["highPriorityCases"]),
+            float(item["averageLatestConfidence"] or 0.0),
+        ),
+        reverse=True,
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": PATTERN_RULES_VERSION,
+        "minCases": min_cases,
+        "totalClusters": len(clusters),
+        "returned": min(limit, len(clusters)),
+        "clusters": clusters[:limit],
+        "interpretationPolicy": (
+            "Clusters are deterministic descriptive groups defined by "
+            "hypothesis class, firmware and factory. They are investigation "
+            "shortcuts, not learned latent clusters or causal findings."
+        ),
+    }
+
+
+@router.get("/patterns/similar/{case_id}")
+def similar_diagnostic_cases(
+    case_id: int,
+    limit: int = Query(default=12, ge=1, le=100),
+    min_score: float = Query(default=0.20, ge=0.0, le=1.0),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, case = _require_current_case(case_id, db)
+    _, _, records = _current_pattern_records(db)
+
+    target = next(
+        (row for row in records if row["caseId"] == case.id),
+        None,
+    )
+    if target is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Pattern record unavailable for current case",
+        )
+
+    similar = []
+    for candidate in records:
+        if candidate["caseId"] == case.id:
+            continue
+        score, matched = similarity_score(target, candidate)
+        if score < min_score:
+            continue
+        similar.append(
+            {
+                **candidate,
+                "similarityScore": score,
+                "matchedDimensions": matched,
+            }
+        )
+
+    similar.sort(
+        key=lambda item: (
+            float(item["similarityScore"]),
+            float(item.get("latestConfidence") or 0.0),
+        ),
+        reverse=True,
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": PATTERN_RULES_VERSION,
+        "target": target,
+        "returned": min(limit, len(similar)),
+        "similarCases": similar[:limit],
+        "interpretationPolicy": (
+            "Similarity is a deterministic metadata/context matching "
+            "heuristic. It is not a learned probability of shared failure "
+            "mode, attribution, or causal proof."
+        ),
+    }
+
+
+def _watchlist_payload(row: DiagnosticWatchlistEntry) -> dict:
+    return {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "caseId": row.case_id,
+        "vehicleId": row.vehicle_id,
+        "createdAt": row.created_at.isoformat(),
+        "actor": row.actor,
+        "note": row.note,
+    }
+
+
+@router.get("/watchlist")
+def diagnostic_watchlist(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    rows = db.execute(
+        select(DiagnosticWatchlistEntry)
+        .where(
+            DiagnosticWatchlistEntry.run_id == run.id,
+            DiagnosticWatchlistEntry.experiment_id == experiment_id,
+        )
+        .order_by(
+            desc(DiagnosticWatchlistEntry.created_at),
+            desc(DiagnosticWatchlistEntry.id),
+        )
+    ).scalars().all()
+
+    case_ids = [row.case_id for row in rows]
+    cases = (
+        db.execute(
+            select(DiagnosticCase).where(
+                DiagnosticCase.run_id == run.id,
+                DiagnosticCase.id.in_(case_ids),
+            )
+        ).scalars().all()
+        if case_ids
+        else []
+    )
+    case_map = {row.id: row for row in cases}
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "entries": [
+            {
+                **_watchlist_payload(row),
+                "case": (
+                    _diagnostic_case_payload(case_map[row.case_id])
+                    if row.case_id in case_map
+                    else None
+                ),
+            }
+            for row in rows
+        ],
+        "total": len(rows),
+    }
+
+
+@router.post("/watchlist/{case_id}")
+def add_diagnostic_watchlist_entry(
+    case_id: int,
+    request: DiagnosticWatchlistCreate,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, case = _require_current_case(case_id, db)
+
+    existing = db.execute(
+        select(DiagnosticWatchlistEntry)
+        .where(
+            DiagnosticWatchlistEntry.run_id == run.id,
+            DiagnosticWatchlistEntry.case_id == case.id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return _watchlist_payload(existing)
+
+    row = DiagnosticWatchlistEntry(
+        run_id=run.id,
+        experiment_id=experiment_id,
+        case_id=case.id,
+        vehicle_id=case.vehicle_id,
+        created_at=datetime.now(timezone.utc),
+        actor=request.actor,
+        note=(request.note.strip() if request.note else None),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _watchlist_payload(row)
+
+
+@router.delete("/watchlist/{case_id}")
+def remove_diagnostic_watchlist_entry(
+    case_id: int,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, case = _require_current_case(case_id, db)
+    row = db.execute(
+        select(DiagnosticWatchlistEntry)
+        .where(
+            DiagnosticWatchlistEntry.run_id == run.id,
+            DiagnosticWatchlistEntry.experiment_id == experiment_id,
+            DiagnosticWatchlistEntry.case_id == case.id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if row is None:
+        return {"removed": False, "caseId": case.id}
+
+    db.delete(row)
+    db.commit()
+    return {"removed": True, "caseId": case.id}
+
+
+def _investigation_view_payload(
+    row: DiagnosticInvestigationView,
+) -> dict:
+    return {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "name": row.name,
+        "actor": row.actor,
+        "filters": _json_object(row.filters_json),
+        "createdAt": row.created_at.isoformat(),
+        "updatedAt": row.updated_at.isoformat(),
+    }
+
+
+@router.get("/investigation-views")
+def diagnostic_investigation_views(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    rows = db.execute(
+        select(DiagnosticInvestigationView)
+        .where(
+            DiagnosticInvestigationView.run_id == run.id,
+            DiagnosticInvestigationView.experiment_id == experiment_id,
+        )
+        .order_by(
+            desc(DiagnosticInvestigationView.updated_at),
+            DiagnosticInvestigationView.name,
+        )
+    ).scalars().all()
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "views": [
+            _investigation_view_payload(row)
+            for row in rows
+        ],
+        "total": len(rows),
+    }
+
+
+@router.post("/investigation-views")
+def create_diagnostic_investigation_view(
+    request: DiagnosticInvestigationViewCreate,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(
+            status_code=422,
+            detail="Investigation view name cannot be blank",
+        )
+
+    allowed_filter_keys = {
+        "status",
+        "reviewPriority",
+        "hypothesisClass",
+        "unassignedOnly",
+    }
+    unsupported = sorted(
+        set(request.filters) - allowed_filter_keys
+    )
+    if unsupported:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported investigation view filters",
+                "unsupported": unsupported,
+                "allowed": sorted(allowed_filter_keys),
+            },
+        )
+
+    existing = db.execute(
+        select(DiagnosticInvestigationView)
+        .where(
+            DiagnosticInvestigationView.run_id == run.id,
+            DiagnosticInvestigationView.name == name,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    if existing is None:
+        row = DiagnosticInvestigationView(
+            run_id=run.id,
+            experiment_id=experiment_id,
+            created_at=now,
+            updated_at=now,
+            actor=request.actor,
+            name=name,
+            filters_json=json.dumps(
+                request.filters,
+                sort_keys=True,
+            ),
+        )
+        db.add(row)
+    else:
+        row = existing
+        row.updated_at = now
+        row.actor = request.actor
+        row.filters_json = json.dumps(
+            request.filters,
+            sort_keys=True,
+        )
+        db.add(row)
+
+    db.commit()
+    db.refresh(row)
+    return _investigation_view_payload(row)
+
+
+@router.delete("/investigation-views/{view_id}")
+def delete_diagnostic_investigation_view(
+    view_id: int,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    row = db.execute(
+        select(DiagnosticInvestigationView)
+        .where(
+            DiagnosticInvestigationView.id == view_id,
+            DiagnosticInvestigationView.run_id == run.id,
+            DiagnosticInvestigationView.experiment_id == experiment_id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Investigation view not found in current run",
+        )
+
+    db.delete(row)
+    db.commit()
+    return {"deleted": True, "viewId": view_id}
 
 
 @router.get("/summary")
