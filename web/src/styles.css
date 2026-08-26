@@ -190,3 +190,289 @@ header { display:flex; justify-content:space-between; gap:30px; align-items:flex
 @media(max-width:1180px){.diagnosticEpisodeMetrics{grid-template-columns:repeat(3,1fr)}.diagnosticEpisodeRow{grid-template-columns:10px 120px 105px 1fr 50px 65px 14px}.diagnosticEpisodeSelectedGrid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:820px){.diagnosticEpisodeMetrics{grid-template-columns:repeat(2,1fr)}.diagnosticEpisodeFilters{flex-wrap:wrap}.diagnosticEpisodeFilterMeta{width:100%;margin-left:0}.diagnosticEpisodeRow{grid-template-columns:10px 110px 100px 1fr 14px}.diagnosticEpisodeEventCount,.diagnosticEpisodeConfidence{display:none}}
 @media(max-width:560px){.diagnosticEpisodeMetrics{grid-template-columns:1fr 1fr}.diagnosticEpisodeFilters label{width:100%}.diagnosticEpisodeFilters select{width:100%;min-width:0}.diagnosticEpisodeCheck{width:auto!important}.diagnosticEpisodeRow{grid-template-columns:10px 1fr 90px 14px}.diagnosticEpisodeSpan{display:none}.diagnosticEpisodeSelectedGrid{grid-template-columns:1fr 1fr}}
+
+
+/* Phase 6.10 — Diagnostic Operations Suite */
+.diagnosticCasePanel { margin-top:10px; min-height:auto; }
+.diagnosticCasePolicy { max-width:980px; margin:9px 0 18px; }
+.diagnosticCaseMetrics {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+  margin-bottom:10px;
+}
+.diagnosticCaseMetric {
+  display:grid;
+  grid-template-columns:24px 1fr auto;
+  align-items:center;
+  gap:8px;
+  min-height:64px;
+  padding:12px 14px;
+  border:1px solid #20252b;
+  border-radius:6px;
+  background:#0e1114;
+}
+.diagnosticCaseMetric > div { color:#77818d; display:grid; place-items:center; }
+.diagnosticCaseMetric svg { width:16px; }
+.diagnosticCaseMetric span { color:#68717c; font-size:9px; }
+.diagnosticCaseMetric strong { font-size:20px; font-weight:540; }
+
+.diagnosticCaseFilters {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+  padding:10px 0 14px;
+  border-bottom:1px solid #1d2127;
+}
+.diagnosticCaseFilters select,
+.diagnosticCaseControls select,
+.diagnosticCaseControls input,
+.diagnosticCaseNoteComposer textarea {
+  color:#c7cdd4;
+  background:#0b0d10;
+  border:1px solid #2a3037;
+  border-radius:5px;
+  outline:none;
+}
+.diagnosticCaseFilters select {
+  min-height:34px;
+  padding:0 30px 0 10px;
+  font-size:10px;
+}
+.diagnosticCaseFilters > span {
+  margin-left:auto;
+  color:#5f6873;
+  font-size:9px;
+  letter-spacing:.06em;
+}
+
+.diagnosticCaseWorkspace {
+  display:grid;
+  grid-template-columns:.82fr 1.18fr;
+  gap:10px;
+  margin-top:12px;
+}
+.diagnosticCaseQueue,
+.diagnosticCaseDetail {
+  min-width:0;
+  border:1px solid #1f242a;
+  border-radius:7px;
+  background:#0a0c0f;
+}
+.diagnosticCaseQueue {
+  max-height:690px;
+  overflow:auto;
+  padding:6px;
+}
+.diagnosticCaseRow {
+  width:100%;
+  display:grid;
+  grid-template-columns:4px 1fr auto;
+  gap:11px;
+  align-items:center;
+  padding:12px 10px;
+  color:#aab2bc;
+  border:1px solid transparent;
+  border-bottom-color:#1a1e23;
+  background:transparent;
+  text-align:left;
+  cursor:pointer;
+  border-radius:5px;
+}
+.diagnosticCaseRow:hover,
+.diagnosticCaseRow.selected {
+  background:#11151a;
+  border-color:#2a3037;
+}
+.diagnosticCaseRow > div:nth-child(2) b,
+.diagnosticCaseRow > div:nth-child(2) span,
+.diagnosticCaseRow > div:nth-child(2) small,
+.diagnosticCaseRow > div:nth-child(3) strong,
+.diagnosticCaseRow > div:nth-child(3) span {
+  display:block;
+}
+.diagnosticCaseRow b { font-size:11px; color:#d2d7dd; }
+.diagnosticCaseRow span { font-size:9px; color:#78818c; margin-top:2px; }
+.diagnosticCaseRow small { font-size:8px; color:#535c66; margin-top:4px; }
+.diagnosticCaseRow > div:nth-child(3) { text-align:right; }
+.diagnosticCaseRow > div:nth-child(3) strong { font-size:13px; }
+.diagnosticCasePriority { width:4px; height:38px; border-radius:4px; }
+.priority-high { background:#a95050; color:#e5aaa4; }
+.priority-medium { background:#a58345; color:#dfc184; }
+.priority-low { background:#687685; color:#a9b6c4; }
+
+.diagnosticCaseDetail { padding:18px; }
+.diagnosticCaseEmpty {
+  min-height:180px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  gap:9px;
+  padding:20px;
+  color:#626c77;
+  text-align:center;
+  font-size:10px;
+  line-height:1.5;
+}
+.diagnosticCaseHero {
+  display:flex;
+  justify-content:space-between;
+  gap:20px;
+  padding-bottom:15px;
+  border-bottom:1px solid #1d2228;
+}
+.diagnosticCaseHero span,
+.diagnosticCaseHero small {
+  color:#5f6873;
+  font-size:8px;
+  letter-spacing:.08em;
+}
+.diagnosticCaseHero h3 {
+  margin:5px 0 3px;
+  font-size:17px;
+  font-weight:550;
+}
+.diagnosticCasePriorityBadge {
+  align-self:flex-start;
+  border:1px solid currentColor;
+  border-radius:999px;
+  padding:6px 9px;
+  background:transparent;
+  font-size:8px;
+  letter-spacing:.11em;
+}
+.diagnosticCaseEvidenceGrid {
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:7px;
+  margin:13px 0;
+}
+.diagnosticCaseEvidenceGrid > div {
+  padding:11px;
+  border:1px solid #20252b;
+  background:#0f1215;
+  border-radius:5px;
+}
+.diagnosticCaseEvidenceGrid span,
+.diagnosticCaseEvidenceGrid b {
+  display:block;
+}
+.diagnosticCaseEvidenceGrid span { color:#5f6873; font-size:8px; }
+.diagnosticCaseEvidenceGrid b { margin-top:4px; font-size:11px; font-weight:530; }
+
+.diagnosticCaseControls {
+  display:grid;
+  grid-template-columns:.7fr .7fr 1.35fr;
+  gap:8px;
+  margin:13px 0;
+}
+.diagnosticCaseControls label > span,
+.diagnosticCaseNoteComposer label {
+  display:block;
+  margin-bottom:5px;
+  color:#606a75;
+  font-size:8px;
+  text-transform:uppercase;
+  letter-spacing:.09em;
+}
+.diagnosticCaseControls select,
+.diagnosticCaseControls input {
+  width:100%;
+  min-height:36px;
+  padding:0 9px;
+  font-size:10px;
+}
+.diagnosticCaseAssignee > div {
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:6px;
+}
+.diagnosticCaseAssignee button,
+.diagnosticCaseNoteComposer button {
+  color:#c8ced5;
+  background:#15191e;
+  border:1px solid #30363e;
+  border-radius:5px;
+  cursor:pointer;
+}
+.diagnosticCaseAssignee button { padding:0 12px; font-size:9px; }
+.diagnosticCaseAssignee button:disabled,
+.diagnosticCaseNoteComposer button:disabled {
+  opacity:.45;
+  cursor:not-allowed;
+}
+
+.diagnosticCaseNoteComposer {
+  padding:13px;
+  border:1px solid #22272e;
+  border-radius:6px;
+  background:#0d1013;
+}
+.diagnosticCaseNoteComposer textarea {
+  display:block;
+  width:100%;
+  min-height:82px;
+  resize:vertical;
+  padding:10px;
+  font:inherit;
+  font-size:10px;
+  line-height:1.5;
+}
+.diagnosticCaseNoteComposer button {
+  margin-top:8px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:8px 10px;
+  font-size:9px;
+}
+
+.diagnosticCaseActivity { margin-top:15px; }
+.diagnosticCaseActivityTitle {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  padding-bottom:7px;
+  color:#59636e;
+  font-size:8px;
+  letter-spacing:.1em;
+}
+.diagnosticCaseActivityTitle b { color:#7c8590; font-weight:500; }
+.diagnosticCaseActivityRow {
+  display:grid;
+  grid-template-columns:20px 1fr;
+  gap:8px;
+  padding:10px 0;
+  border-top:1px solid #1d2127;
+}
+.diagnosticCaseActivityRow > div:first-child { color:#6f7a85; }
+.diagnosticCaseActivityRow b,
+.diagnosticCaseActivityRow span {
+  display:block;
+}
+.diagnosticCaseActivityRow b { font-size:9px; font-weight:530; }
+.diagnosticCaseActivityRow span { margin-top:2px; color:#555f69; font-size:8px; }
+.diagnosticCaseActivityRow p {
+  margin:6px 0 0;
+  color:#8d96a0;
+  font-size:10px;
+  line-height:1.5;
+}
+
+@media(max-width:1180px) {
+  .diagnosticCaseWorkspace { grid-template-columns:1fr; }
+  .diagnosticCaseQueue { max-height:390px; }
+}
+@media(max-width:850px) {
+  .diagnosticCaseMetrics { grid-template-columns:repeat(2,1fr); }
+  .diagnosticCaseEvidenceGrid { grid-template-columns:repeat(2,1fr); }
+  .diagnosticCaseControls { grid-template-columns:1fr; }
+  .diagnosticCaseFilters > span { width:100%; margin-left:0; }
+}
+@media(max-width:560px) {
+  .diagnosticCaseMetrics,
+  .diagnosticCaseEvidenceGrid { grid-template-columns:1fr; }
+  .diagnosticCaseHero { flex-direction:column; }
+}
