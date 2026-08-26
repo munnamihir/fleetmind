@@ -734,3 +734,329 @@ header { display:flex; justify-content:space-between; gap:30px; align-items:flex
   .fleetPatternMetrics { grid-template-columns:repeat(2,1fr); }
   .fleetSavedViewComposer { grid-template-columns:1fr; }
 }
+
+
+/* Phase 6.12 — Prognostics & Maintenance Intelligence Suite */
+.prognosticPanel { margin-top:10px; min-height:auto; }
+.prognosticPolicy { max-width:1040px; margin:8px 0 16px; }
+.prognosticMetrics {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+}
+.prognosticMetric {
+  padding:13px 14px;
+  border:1px solid #20262c;
+  border-radius:6px;
+  background:#0c0f12;
+}
+.prognosticMetric span,
+.prognosticMetric strong,
+.prognosticMetric small { display:block; }
+.prognosticMetric span {
+  color:#646f7a;
+  font-size:8px;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+}
+.prognosticMetric strong {
+  margin-top:4px;
+  color:#d2d7dd;
+  font-size:22px;
+  font-weight:540;
+}
+.prognosticMetric small {
+  margin-top:2px;
+  color:#535d67;
+  font-size:8px;
+}
+.prognosticTierStrip {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+  margin:8px 0 10px;
+}
+.prognosticTierStrip > div {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:8px 10px;
+  border:1px solid #1d2329;
+  border-radius:5px;
+  background:#090c0f;
+}
+.prognosticTierStrip span {
+  color:#68727d;
+  font-size:8px;
+}
+.prognosticTierStrip strong {
+  color:#bfc6ce;
+  font-size:12px;
+}
+.prognosticGrid {
+  display:grid;
+  grid-template-columns:.92fr 1.08fr;
+  gap:10px;
+  margin-top:10px;
+}
+.prognosticGrid.lower {
+  grid-template-columns:1.05fr .95fr;
+}
+.prognosticCard {
+  min-width:0;
+  padding:16px;
+  border:1px solid #20262c;
+  border-radius:7px;
+  background:#090c0f;
+}
+.prognosticCardTitle {
+  display:flex;
+  gap:9px;
+  align-items:flex-start;
+  min-height:38px;
+}
+.prognosticCardTitle > svg {
+  color:#73808b;
+  flex:0 0 auto;
+}
+.prognosticCardTitle span,
+.prognosticCardTitle b { display:block; }
+.prognosticCardTitle span {
+  color:#5b6671;
+  font-size:8px;
+  letter-spacing:.1em;
+}
+.prognosticCardTitle b {
+  margin-top:3px;
+  color:#c7cdd4;
+  font-size:11px;
+  font-weight:540;
+}
+.prognosticQueue {
+  max-height:500px;
+  overflow:auto;
+  margin-top:8px;
+}
+.prognosticQueue button {
+  display:grid;
+  grid-template-columns:1fr auto;
+  align-items:center;
+  gap:10px;
+  width:100%;
+  padding:10px 8px;
+  border:0;
+  border-top:1px solid #1a2026;
+  background:transparent;
+  color:#9ca6af;
+  text-align:left;
+  cursor:pointer;
+}
+.prognosticQueue button.selected {
+  background:#11161b;
+  box-shadow:inset 2px 0 0 #5d6975;
+}
+.prognosticQueue b,
+.prognosticQueue span,
+.prognosticQueue small,
+.prognosticQueue strong { display:block; }
+.prognosticQueue b { color:#c4cbd2; font-size:10px; }
+.prognosticQueue span { margin-top:2px; color:#69747e; font-size:8px; }
+.prognosticQueue small { margin-top:3px; color:#4f5963; font-size:8px; }
+.prognosticQueue strong {
+  color:#d2d7dc;
+  font-size:15px;
+  text-align:right;
+}
+.prognosticQueue button > div:last-child span { text-align:right; }
+.prognosticChart {
+  width:100%;
+  height:210px;
+  margin-top:8px;
+  border:1px solid #1d2329;
+  border-radius:6px;
+  background:#080b0e;
+}
+.prognosticThreshold {
+  stroke:#554d3e;
+  stroke-width:1;
+  stroke-dasharray:5 5;
+}
+.prognosticLine {
+  fill:none;
+  stroke:#8b949e;
+  stroke-width:2;
+}
+.prognosticPoint {
+  fill:#c2c8ce;
+  stroke:#080b0e;
+  stroke-width:1;
+}
+.prognosticStatGrid {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:6px;
+  margin-top:8px;
+}
+.prognosticStatGrid > div {
+  padding:9px;
+  border:1px solid #1d2329;
+  border-radius:5px;
+}
+.prognosticStatGrid span,
+.prognosticStatGrid b { display:block; }
+.prognosticStatGrid span { color:#59636d; font-size:8px; }
+.prognosticStatGrid b { margin-top:3px; color:#b8c0c8; font-size:10px; }
+.prognosticHorizon {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin-top:8px;
+}
+.prognosticHorizon > div {
+  padding:12px;
+  border:1px solid #2a2f35;
+  border-radius:6px;
+  background:#0f1317;
+}
+.prognosticHorizon span,
+.prognosticHorizon strong,
+.prognosticHorizon b { display:block; }
+.prognosticHorizon span { color:#66717b; font-size:8px; }
+.prognosticHorizon strong {
+  margin-top:5px;
+  color:#d2d7dc;
+  font-size:20px;
+  font-weight:540;
+}
+.prognosticHorizon b { margin-top:5px; color:#aab2bb; font-size:11px; }
+.prognosticBacktestHero {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:6px;
+  margin:10px 0;
+}
+.prognosticBacktestHero > div {
+  padding:10px;
+  border:1px solid #1d2329;
+  border-radius:5px;
+}
+.prognosticBacktestHero span,
+.prognosticBacktestHero strong { display:block; }
+.prognosticBacktestHero span { color:#59636e; font-size:8px; }
+.prognosticBacktestHero strong { margin-top:4px; color:#c7ced5; font-size:13px; }
+.prognosticBacktestRows > div {
+  display:grid;
+  grid-template-columns:1fr auto auto auto;
+  gap:10px;
+  align-items:center;
+  padding:8px 0;
+  border-top:1px solid #1a2026;
+  font-size:8px;
+}
+.prognosticBacktestRows b { color:#b9c0c8; }
+.prognosticBacktestRows span { color:#65707a; }
+.prognosticBacktestRows strong { color:#abb3bc; }
+.prognosticFootnote { margin:10px 0 0; font-size:8px; }
+.maintenanceComposer {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin-top:10px;
+}
+.maintenanceComposer label span {
+  display:block;
+  margin-bottom:4px;
+  color:#626d78;
+  font-size:8px;
+}
+.maintenanceComposer input,
+.maintenanceComposer select,
+.maintenanceComposer textarea {
+  box-sizing:border-box;
+  width:100%;
+  color:#b8c0c8;
+  background:#0b0e11;
+  border:1px solid #293139;
+  border-radius:5px;
+  font-size:9px;
+}
+.maintenanceComposer input,
+.maintenanceComposer select {
+  height:34px;
+  padding:0 8px;
+}
+.maintenanceComposer textarea {
+  min-height:68px;
+  padding:8px;
+  resize:vertical;
+}
+.maintenanceComposer .wide { grid-column:1/-1; }
+.maintenanceComposer > button {
+  grid-column:1/-1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  height:34px;
+  color:#c5cbd2;
+  background:#171c21;
+  border:1px solid #323941;
+  border-radius:5px;
+  cursor:pointer;
+  font-size:8px;
+}
+.maintenancePlanSnapshot {
+  display:grid;
+  grid-template-columns:auto 1fr 1fr 1fr;
+  gap:10px;
+  align-items:center;
+  margin-top:10px;
+  padding:10px;
+  border:1px solid #20262c;
+  border-radius:6px;
+}
+.maintenancePlanSnapshot > svg { color:#6c7781; }
+.maintenancePlanSnapshot span,
+.maintenancePlanSnapshot b { display:block; }
+.maintenancePlanSnapshot span { color:#59646e; font-size:8px; }
+.maintenancePlanSnapshot b { margin-top:2px; color:#b8c0c8; font-size:9px; }
+.maintenanceActivity {
+  margin-top:8px;
+  max-height:220px;
+  overflow:auto;
+}
+.maintenanceActivity > div {
+  display:flex;
+  gap:8px;
+  padding:8px 0;
+  border-top:1px solid #1a2026;
+}
+.maintenanceActivity svg { color:#65707b; margin-top:2px; }
+.maintenanceActivity b,
+.maintenanceActivity span,
+.maintenanceActivity small { display:block; }
+.maintenanceActivity b { color:#afb7c0; font-size:8px; }
+.maintenanceActivity span { margin-top:2px; color:#5e6873; font-size:8px; }
+.maintenanceActivity small { margin-top:3px; color:#737d87; font-size:8px; }
+.prognosticEmpty {
+  display:grid;
+  place-items:center;
+  min-height:160px;
+  color:#58636e;
+  font-size:9px;
+}
+
+@media(max-width:1100px) {
+  .prognosticGrid,
+  .prognosticGrid.lower { grid-template-columns:1fr; }
+}
+@media(max-width:760px) {
+  .prognosticMetrics,
+  .prognosticTierStrip,
+  .prognosticBacktestHero,
+  .prognosticStatGrid { grid-template-columns:repeat(2,1fr); }
+  .prognosticHorizon,
+  .maintenanceComposer { grid-template-columns:1fr; }
+  .maintenanceComposer .wide,
+  .maintenanceComposer > button { grid-column:auto; }
+}
