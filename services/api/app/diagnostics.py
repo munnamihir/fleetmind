@@ -78,12 +78,21 @@ from fleetmind_common.diagnostic_store import (
     DiagnosticMaintenanceActivity,
     DiagnosticMaintenancePlan,
     DiagnosticWatchlistEntry,
+    DiagnosticVehicleTwinSnapshot,
     DiagnosticEpisode,
     DiagnosticEvent,
     DiagnosticFleetDecisionSnapshot,
     DiagnosticModelRun,
     DiagnosticPrediction,
     DiagnosticReplayPoint,
+)
+from fleetmind_common.vehicle_twin_rules import (
+    VEHICLE_TWIN_RULES_VERSION,
+    canonical_twin_state,
+    compare_twin_states,
+    current_automation_status,
+    layer_presence_payload,
+    twin_list_record,
 )
 from fleetmind_common.fleet_decision_rules import (
     COHORT_DIMENSIONS,
@@ -2500,8 +2509,14 @@ def _trajectory_payload(
 
 def _current_prognostic_records(
     db: Session,
+    *,
+    selected_run: DiagnosticModelRun | None = None,
 ) -> tuple[str, DiagnosticModelRun, list[dict]]:
-    experiment_id, run = _require_current_run(db)
+    if selected_run is None:
+        experiment_id, run = _require_current_run(db)
+    else:
+        run = selected_run
+        experiment_id = run.experiment_id
 
     cases = db.execute(
         select(DiagnosticCase)
@@ -4310,8 +4325,14 @@ def _fleet_decision_scope_policy() -> dict:
 
 def _current_fleet_decision_records(
     db: Session,
+    *,
+    selected_run: DiagnosticModelRun | None = None,
 ) -> tuple[str, DiagnosticModelRun, list[dict]]:
-    experiment_id, run = _require_current_run(db)
+    if selected_run is None:
+        experiment_id, run = _require_current_run(db)
+    else:
+        run = selected_run
+        experiment_id = run.experiment_id
 
     predictions = db.execute(
         select(DiagnosticPrediction)
@@ -4322,7 +4343,10 @@ def _current_fleet_decision_records(
         .order_by(DiagnosticPrediction.vehicle_id)
     ).scalars().all()
 
-    _, prognostic_run, prognostic_records = _current_prognostic_records(db)
+    _, prognostic_run, prognostic_records = _current_prognostic_records(
+        db,
+        selected_run=run,
+    )
     if prognostic_run.id != run.id:
         raise HTTPException(
             status_code=409,
@@ -4949,6 +4973,647 @@ def fleet_decision_snapshot_detail(
         ),
         "scopePolicy": _fleet_decision_scope_policy(),
     }
+
+# Phase 7.1 — Vehicle Operational Digital Twin
+# Operational/diagnostic state only: not a physics twin, failure-truth view,
+# causal graph, component-condition proof, or physical RUL model.
+
+class VehicleTwinSnapshotCreate(BaseModel):
+    actor: str = Field(default="operator", min_length=1, max_length=64)
+    label: str | None = Field(default=None, max_length=160)
+
+
+def _vehicle_twin_scope_policy() -> dict:
+    return {
+        "currentRunOnly": False,
+        "selectedRunOnly": True,
+        "defaultRunSelection": "latest_persisted_trained_run",
+        "activeTelemetryExperimentRequired": False,
+        "exactExperimentOnly": True,
+        "runFrozenReplayOnly": True,
+        "observableTelemetryContextOnly": True,
+        "telemetryContextBoundedToPredictionAnchor": True,
+        "postRunTelemetryUsed": False,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "physicsTwin": False,
+        "physicalConditionProof": False,
+        "physicalRul": False,
+        "causalGraph": False,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+    }
+
+
+def _vehicle_twin_snapshot_payload(row, include_twin: bool = False) -> dict:
+    out = {
+        "id": row.id, "runId": row.run_id, "experimentId": row.experiment_id,
+        "vehicleId": row.vehicle_id, "rulesVersion": row.rules_version,
+        "createdAt": row.created_at.isoformat(), "actor": row.actor,
+        "label": row.label, "stateHash": row.state_hash,
+    }
+    if include_twin:
+        out["twin"] = _json_object(row.twin_json)
+    return out
+
+
+def _resolve_vehicle_twin_run(
+    db: Session,
+    run_id: int | None = None,
+) -> tuple[str, DiagnosticModelRun]:
+    """
+    Resolve the diagnostic run used by the Phase 7.1 operational twin.
+
+    Explicit run selection is authoritative. Without run_id, select the latest
+    persisted trained diagnostic run rather than deriving identity from the
+    newest telemetry experiment. This prevents an unrelated simulator restart
+    from changing or orphaning the operational twin.
+    """
+
+    if run_id is not None:
+        run = db.get(DiagnosticModelRun, run_id)
+
+        if run is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Diagnostic run {run_id} does not exist",
+            )
+
+        if run.status != "trained":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Diagnostic run {run_id} is not a trained operational run"
+                ),
+            )
+    else:
+        run = db.execute(
+            select(DiagnosticModelRun)
+            .where(DiagnosticModelRun.status == "trained")
+            .order_by(
+                desc(DiagnosticModelRun.created_at),
+                desc(DiagnosticModelRun.id),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+
+        if run is None:
+            raise HTTPException(
+                status_code=503,
+                detail="No persisted trained diagnostic run is available",
+            )
+
+    prediction_count = int(
+        db.scalar(
+            select(func.count(DiagnosticPrediction.id)).where(
+                DiagnosticPrediction.run_id == run.id,
+                DiagnosticPrediction.experiment_id == run.experiment_id,
+            )
+        )
+        or 0
+    )
+
+    if prediction_count < 1:
+        status_code = 409 if run_id is not None else 503
+        raise HTTPException(
+            status_code=status_code,
+            detail=(
+                f"Diagnostic run {run.id} has no persisted operational "
+                "predictions"
+            ),
+        )
+
+    return run.experiment_id, run
+
+
+def _current_vehicle_twin_record(
+    db: Session,
+    vehicle_id: str,
+    *,
+    selected_run: DiagnosticModelRun | None = None,
+):
+    if selected_run is None:
+        experiment_id, run = _resolve_vehicle_twin_run(db)
+    else:
+        run = selected_run
+        experiment_id = run.experiment_id
+
+    _, decision_run, decisions = _current_fleet_decision_records(
+        db,
+        selected_run=run,
+    )
+    if decision_run.id != run.id:
+        raise HTTPException(status_code=409, detail="Fleet decision state is not aligned to the current run")
+    decision = next((r for r in decisions if r["vehicleId"] == vehicle_id), None)
+    if decision is None:
+        raise HTTPException(status_code=404, detail="Vehicle is not present in current operational twin population")
+
+    prediction = db.execute(select(DiagnosticPrediction).where(
+        DiagnosticPrediction.run_id == run.id,
+        DiagnosticPrediction.experiment_id == experiment_id,
+        DiagnosticPrediction.vehicle_id == vehicle_id,
+    ).limit(1)).scalar_one_or_none()
+    if prediction is None:
+        raise HTTPException(status_code=404, detail="Current-run prediction unavailable for vehicle twin")
+
+    scoring_context = db.execute(
+        select(Telemetry)
+        .where(
+            Telemetry.experiment_id == experiment_id,
+            Telemetry.vehicle_id == vehicle_id,
+            Telemetry.timestamp <= prediction.anchor_timestamp,
+        )
+        .order_by(
+            desc(Telemetry.timestamp),
+            desc(Telemetry.id),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    episode = None
+    if decision.get("episodeId") is not None:
+        episode = db.execute(select(DiagnosticEpisode).where(
+            DiagnosticEpisode.id == int(decision["episodeId"]),
+            DiagnosticEpisode.run_id == run.id,
+            DiagnosticEpisode.experiment_id == experiment_id,
+        ).limit(1)).scalar_one_or_none()
+
+    case = None
+    if decision.get("caseId") is not None:
+        case = db.execute(select(DiagnosticCase).where(
+            DiagnosticCase.id == int(decision["caseId"]),
+            DiagnosticCase.run_id == run.id,
+            DiagnosticCase.experiment_id == experiment_id,
+        ).limit(1)).scalar_one_or_none()
+
+    plan = None
+    watch = None
+    if case is not None:
+        plan = db.execute(select(DiagnosticMaintenancePlan).where(
+            DiagnosticMaintenancePlan.run_id == run.id,
+            DiagnosticMaintenancePlan.experiment_id == experiment_id,
+            DiagnosticMaintenancePlan.case_id == case.id,
+        ).limit(1)).scalar_one_or_none()
+        watch = db.execute(select(DiagnosticWatchlistEntry).where(
+            DiagnosticWatchlistEntry.run_id == run.id,
+            DiagnosticWatchlistEntry.experiment_id == experiment_id,
+            DiagnosticWatchlistEntry.case_id == case.id,
+        ).limit(1)).scalar_one_or_none()
+
+    actions = db.execute(select(DiagnosticAutomationAction).where(
+        DiagnosticAutomationAction.run_id == run.id,
+        DiagnosticAutomationAction.experiment_id == experiment_id,
+        DiagnosticAutomationAction.vehicle_id == vehicle_id,
+    ).order_by(DiagnosticAutomationAction.id)).scalars().all()
+    statuses = sorted({a.status for a in actions})
+
+    fleet_links = []
+    fleet_snaps = db.execute(select(DiagnosticFleetDecisionSnapshot).where(
+        DiagnosticFleetDecisionSnapshot.run_id == run.id,
+        DiagnosticFleetDecisionSnapshot.experiment_id == experiment_id,
+    ).order_by(DiagnosticFleetDecisionSnapshot.created_at)).scalars().all()
+    for snap in fleet_snaps:
+        if any(isinstance(r, dict) and r.get("vehicleId") == vehicle_id for r in _json_list(snap.records_json)):
+            fleet_links.append({
+                "snapshotId": snap.id, "createdAt": snap.created_at.isoformat(),
+                "label": snap.label, "stateHash": snap.state_hash,
+            })
+
+    twin = {
+        "vehicleId": vehicle_id, "runId": run.id, "experimentId": experiment_id,
+        "lineage": run.lineage, "rulesVersion": VEHICLE_TWIN_RULES_VERSION,
+        "vehicleContext": {
+            "model": scoring_context.model if scoring_context else None,
+            "factory": scoring_context.factory if scoring_context else None,
+            "firmware": scoring_context.firmware if scoring_context else None,
+            "pumpRevision": scoring_context.pump_revision if scoring_context else None,
+            "scoringContextMileage": (
+                round(float(scoring_context.mileage), 1)
+                if scoring_context
+                else None
+            ),
+            "scoringContextTimestamp": (
+                scoring_context.timestamp.isoformat()
+                if scoring_context
+                else None
+            ),
+        },
+        "modelState": {
+            "predictionId": prediction.id, "topClass": prediction.top_class,
+            "topConfidence": round(float(prediction.top_confidence), 6),
+            "anchorTimestamp": prediction.anchor_timestamp.isoformat(),
+            "anchorMileage": round(float(prediction.anchor_mileage), 1),
+            "hypotheses": _json_list(prediction.hypotheses_json),
+            "observableEvidence": _json_list(prediction.evidence_json),
+            "champion": run.champion,
+        },
+        "diagnosticState": {
+            "episodeId": episode.id if episode else None,
+            "hypothesisClass": episode.hypothesis_class if episode else None,
+            "episodeState": episode.state if episode else None,
+            "isOpen": bool(episode.is_open) if episode else None,
+            "leftCensored": bool(episode.left_censored) if episode else None,
+            "startTimestamp": episode.start_timestamp.isoformat() if episode else None,
+            "startMileage": round(float(episode.start_mileage), 1) if episode else None,
+            "latestTimestamp": episode.end_timestamp.isoformat() if episode else None,
+            "latestMileage": round(float(episode.end_mileage), 1) if episode else None,
+            "eventCount": int(episode.event_count) if episode else 0,
+            "latestConfidence": round(float(episode.latest_confidence), 6) if episode and episode.latest_confidence is not None else None,
+        },
+        "caseState": {
+            "caseId": case.id if case else None, "status": case.status if case else None,
+            "reviewPriority": case.review_priority if case else None,
+            "assignedTo": case.assigned_to if case else None,
+            "noteCount": int(case.note_count) if case else 0,
+            "watchlisted": watch is not None,
+            "watchlistEntryId": watch.id if watch else None,
+        },
+        "prognosticState": {
+            "maintenanceTier": decision.get("maintenanceTier"),
+            "priorityScore": decision.get("priorityScore"),
+            "recommendedReviewWindow": decision.get("recommendedReviewWindow"),
+            "trajectoryEligible": decision.get("trajectoryEligible"),
+        },
+        "maintenanceState": {
+            "planId": plan.id if plan else None, "state": plan.state if plan else None,
+            "owner": plan.owner if plan else None,
+            "targetMileage": round(float(plan.target_mileage), 1) if plan and plan.target_mileage is not None else None,
+            "updatedAt": plan.updated_at.isoformat() if plan else None,
+        },
+        "automationState": {
+            "actionIds": [a.id for a in actions], "statuses": statuses,
+            "currentStatus": current_automation_status(statuses),
+            "pendingActionTypes": sorted({a.action_type for a in actions if a.status == AUTOMATION_STATUS_PENDING_APPROVAL}),
+            "actions": [{
+                "id": a.id, "policyKey": a.policy_key, "status": a.status,
+                "severity": a.severity, "actionType": a.action_type,
+                "createdAt": a.created_at.isoformat(),
+            } for a in actions],
+        },
+        "fleetDecisionState": {
+            "decisionState": decision.get("decisionState"),
+            "attentionScore": decision.get("attentionScore"),
+            "workloadUnits": decision.get("workloadUnits"),
+        },
+        "coverageState": {
+            "coverageGaps": list(decision.get("coverageGaps") or []),
+            "coverageGapCount": len(decision.get("coverageGaps") or []),
+        },
+        "fleetSnapshotLinks": fleet_links,
+        "sourceVersions": {
+            "twinRules": VEHICLE_TWIN_RULES_VERSION,
+            "modelLineage": run.lineage,
+            "eventRules": episode.source_event_rules_version if episode else None,
+            "episodeRules": episode.rules_version if episode else None,
+            "caseRules": case.rules_version if case else None,
+            "prognosticRules": plan.rules_version if plan else PROGNOSTIC_RULES_VERSION,
+            "automationRules": AUTOMATION_RULES_VERSION,
+            "fleetDecisionRules": FLEET_DECISION_RULES_VERSION,
+        },
+    }
+    twin["layerPresence"] = layer_presence_payload(twin)
+    return experiment_id, run, twin
+
+
+def _vehicle_twin_timeline_items(db: Session, experiment_id: str, run, vehicle_id: str) -> list[dict]:
+    items = []
+
+    # The persisted DiagnosticPrediction is the authoritative scoring snapshot
+    # for this run. Replay rows may have been reconstructed later from
+    # observable, anchor-bounded telemetry and can therefore differ numerically.
+    prediction = db.execute(
+        select(DiagnosticPrediction).where(
+            DiagnosticPrediction.run_id == run.id,
+            DiagnosticPrediction.experiment_id == experiment_id,
+            DiagnosticPrediction.vehicle_id == vehicle_id,
+        ).limit(1)
+    ).scalar_one_or_none()
+
+    if prediction is not None:
+        items.append({
+            "id": f"prediction-{prediction.id}",
+            "layer": "MODEL",
+            "type": "CANONICAL_PREDICTION",
+            "timestamp": prediction.anchor_timestamp.isoformat(),
+            "mileage": round(float(prediction.anchor_mileage), 1),
+            "title": f"Canonical prediction: {prediction.top_class}",
+            "detail": (
+                f"Top confidence {float(prediction.top_confidence):.3f} · "
+                "persisted scoring snapshot"
+            ),
+        })
+
+    replay = db.execute(
+        select(DiagnosticReplayPoint).where(
+            DiagnosticReplayPoint.run_id == run.id,
+            DiagnosticReplayPoint.experiment_id == experiment_id,
+            DiagnosticReplayPoint.vehicle_id == vehicle_id,
+        ).order_by(
+            DiagnosticReplayPoint.anchor_timestamp,
+            DiagnosticReplayPoint.id,
+        )
+    ).scalars().all()
+
+    prev = None
+    for i, point in enumerate(replay):
+        if (
+            i == 0
+            or i == len(replay) - 1
+            or point.top_class != prev
+        ):
+            items.append({
+                "id": f"replay-{point.id}",
+                "layer": "MODEL",
+                "type": "REPLAY_STATE",
+                "timestamp": point.anchor_timestamp.isoformat(),
+                "mileage": round(float(point.anchor_mileage), 1),
+                "title": f"Replay reconstruction: {point.top_class}",
+                "detail": (
+                    f"Top confidence {float(point.top_confidence):.3f} · "
+                    "reconstructed observable history"
+                ),
+            })
+
+        prev = point.top_class
+
+    for e in db.execute(select(DiagnosticEvent).where(
+        DiagnosticEvent.run_id == run.id, DiagnosticEvent.experiment_id == experiment_id,
+        DiagnosticEvent.vehicle_id == vehicle_id,
+    ).order_by(DiagnosticEvent.anchor_timestamp, DiagnosticEvent.id)).scalars().all():
+        items.append({"id": f"event-{e.id}", "layer":"DIAGNOSTIC", "type":e.event_type,
+            "timestamp":e.anchor_timestamp.isoformat(), "mileage":round(float(e.anchor_mileage),1),
+            "title":e.event_type.replace("_"," ").title(),
+            "detail":f"{e.previous_class or '—'} → {e.current_class or '—'}"})
+
+    for ep in db.execute(select(DiagnosticEpisode).where(
+        DiagnosticEpisode.run_id == run.id, DiagnosticEpisode.experiment_id == experiment_id,
+        DiagnosticEpisode.vehicle_id == vehicle_id,
+    ).order_by(DiagnosticEpisode.start_timestamp)).scalars().all():
+        items.append({"id":f"episode-{ep.id}","layer":"DIAGNOSTIC","type":"EPISODE_STARTED",
+            "timestamp":ep.start_timestamp.isoformat(),"mileage":round(float(ep.start_mileage),1),
+            "title":f"{ep.hypothesis_class} episode","detail":f"State {ep.state}"})
+
+    for c in db.execute(select(DiagnosticCase).where(
+        DiagnosticCase.run_id == run.id, DiagnosticCase.experiment_id == experiment_id,
+        DiagnosticCase.vehicle_id == vehicle_id,
+    ).order_by(DiagnosticCase.created_at)).scalars().all():
+        items.append({"id":f"case-{c.id}","layer":"CASE","type":"CASE_CREATED",
+            "timestamp":c.created_at.isoformat(),"mileage":round(float(c.start_mileage),1),
+            "title":f"Case #{c.id} created","detail":f"{c.review_priority} · {c.status}"})
+
+    for a in db.execute(select(DiagnosticCaseActivity).where(
+        DiagnosticCaseActivity.run_id == run.id, DiagnosticCaseActivity.experiment_id == experiment_id,
+        DiagnosticCaseActivity.vehicle_id == vehicle_id,
+    ).order_by(DiagnosticCaseActivity.created_at)).scalars().all():
+        items.append({"id":f"case-activity-{a.id}","layer":"CASE","type":a.activity_type,
+            "timestamp":a.created_at.isoformat(),"mileage":None,"title":a.activity_type.replace("_"," ").title(),
+            "detail":a.note_text or f"{a.from_value or '—'} → {a.to_value or '—'}"})
+
+    for w in db.execute(select(DiagnosticWatchlistEntry).where(
+        DiagnosticWatchlistEntry.run_id == run.id, DiagnosticWatchlistEntry.experiment_id == experiment_id,
+        DiagnosticWatchlistEntry.vehicle_id == vehicle_id,
+    ).order_by(DiagnosticWatchlistEntry.created_at)).scalars().all():
+        items.append({"id":f"watch-{w.id}","layer":"CASE","type":"WATCHLIST_ADDED",
+            "timestamp":w.created_at.isoformat(),"mileage":None,"title":"Added to watchlist","detail":w.note or f"Actor {w.actor}"})
+
+    for a in db.execute(select(DiagnosticMaintenanceActivity).where(
+        DiagnosticMaintenanceActivity.run_id == run.id, DiagnosticMaintenanceActivity.experiment_id == experiment_id,
+        DiagnosticMaintenanceActivity.vehicle_id == vehicle_id,
+    ).order_by(DiagnosticMaintenanceActivity.created_at)).scalars().all():
+        items.append({"id":f"maint-{a.id}","layer":"MAINTENANCE","type":a.activity_type,
+            "timestamp":a.created_at.isoformat(),"mileage":None,"title":a.activity_type.replace("_"," ").title(),
+            "detail":a.note_text or f"{a.from_value or '—'} → {a.to_value or '—'}"})
+
+    for a in db.execute(select(DiagnosticAutomationActivity).where(
+        DiagnosticAutomationActivity.run_id == run.id, DiagnosticAutomationActivity.experiment_id == experiment_id,
+        DiagnosticAutomationActivity.vehicle_id == vehicle_id,
+    ).order_by(DiagnosticAutomationActivity.created_at)).scalars().all():
+        items.append({"id":f"auto-{a.id}","layer":"AUTOMATION","type":a.activity_type,
+            "timestamp":a.created_at.isoformat(),"mileage":None,"title":a.activity_type.replace("_"," ").title(),
+            "detail":a.note_text or f"Actor {a.actor}"})
+
+    for s in db.execute(select(DiagnosticFleetDecisionSnapshot).where(
+        DiagnosticFleetDecisionSnapshot.run_id == run.id,
+        DiagnosticFleetDecisionSnapshot.experiment_id == experiment_id,
+    ).order_by(DiagnosticFleetDecisionSnapshot.created_at)).scalars().all():
+        if any(isinstance(r,dict) and r.get("vehicleId") == vehicle_id for r in _json_list(s.records_json)):
+            items.append({"id":f"fleet-snap-{s.id}","layer":"FLEET_DECISION","type":"FLEET_STATE_CHECKPOINT",
+                "timestamp":s.created_at.isoformat(),"mileage":None,"title":s.label or f"Fleet snapshot #{s.id}","detail":s.state_hash})
+    items.sort(key=lambda x:(x["timestamp"],x["id"]))
+    return items
+
+
+@router.get("/twins/summary")
+def vehicle_twins_summary(
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _resolve_vehicle_twin_run(db, run_id)
+    _, _, records = _current_fleet_decision_records(
+        db,
+        selected_run=run,
+    )
+    rows = [twin_list_record(r) for r in records]
+    snapshot_count = int(db.scalar(select(func.count(DiagnosticVehicleTwinSnapshot.id)).where(
+        DiagnosticVehicleTwinSnapshot.run_id == run.id,
+        DiagnosticVehicleTwinSnapshot.experiment_id == experiment_id,
+    )) or 0)
+    return {
+        "runId":run.id,"experimentId":experiment_id,"lineage":run.lineage,
+        "rulesVersion":VEHICLE_TWIN_RULES_VERSION,"totalTwins":len(rows),
+        "twinsWithEpisodes":sum(1 for r in rows if r["episodeId"] is not None),
+        "twinsWithCases":sum(1 for r in rows if r["caseId"] is not None),
+        "twinsWithMaintenancePlans":sum(1 for r in rows if r["maintenancePlanState"] is not None),
+        "twinsWithAutomation":sum(1 for r in rows if r["automationStatus"] is not None),
+        "twinsWithCoverageGaps":sum(1 for r in rows if r["coverageGaps"]),
+        "persistedTwinSnapshots":snapshot_count,
+        "byDecisionState":[{"state":s,"twins":sum(1 for r in rows if r["decisionState"]==s)} for s in DECISION_STATES],
+        "scopePolicy":_vehicle_twin_scope_policy(),
+        "interpretationPolicy":"Operational twin, not a validated physics-based digital twin or proof of component condition.",
+        "generatedAt":datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/twins")
+def vehicle_twins(limit:int=Query(default=100,ge=1,le=500), decision_state:str|None=None,
+                  hypothesis_class:str|None=None, gap:str|None=None,
+                  run_id:int|None=Query(default=None,ge=1),
+                  db:Session=Depends(db_session)) -> dict:
+    experiment_id, run = _resolve_vehicle_twin_run(db, run_id)
+    _, _, records = _current_fleet_decision_records(
+        db,
+        selected_run=run,
+    )
+    rows=[twin_list_record(r) for r in records]
+    if decision_state:
+        if decision_state not in DECISION_STATES: raise HTTPException(422, detail="Unsupported decision state")
+        rows=[r for r in rows if r["decisionState"]==decision_state]
+    if hypothesis_class: rows=[r for r in rows if r["topClass"]==hypothesis_class]
+    if gap:
+        if gap not in COVERAGE_GAPS: raise HTTPException(422, detail="Unsupported coverage gap")
+        rows=[r for r in rows if gap in r["coverageGaps"]]
+    rows.sort(key=lambda r:(float(r.get("attentionScore") or 0),float(r.get("topConfidence") or 0),r["vehicleId"]),reverse=True)
+    return {"runId":run.id,"experimentId":experiment_id,"rulesVersion":VEHICLE_TWIN_RULES_VERSION,
+            "totalMatched":len(rows),"returned":min(limit,len(rows)),"twins":rows[:limit],"scopePolicy":_vehicle_twin_scope_policy()}
+
+
+@router.get("/twins/compare")
+def compare_vehicle_twins(vehicle_ids:str=Query(min_length=1),
+                          run_id:int|None=Query(default=None,ge=1),
+                          db:Session=Depends(db_session)) -> dict:
+    ids=list(dict.fromkeys(v.strip() for v in vehicle_ids.split(",") if v.strip()))
+    if len(ids)<2 or len(ids)>4: raise HTTPException(422,detail="Provide between 2 and 4 comma-separated vehicle IDs")
+    _, run = _resolve_vehicle_twin_run(db, run_id)
+    twins=[
+        _current_vehicle_twin_record(
+            db,
+            v,
+            selected_run=run,
+        )[2]
+        for v in ids
+    ]
+    return {"rulesVersion":VEHICLE_TWIN_RULES_VERSION,"referenceVehicleId":twins[0]["vehicleId"],
+            "vehicles":twins,"comparisons":[compare_twin_states(twins[0],t) for t in twins[1:]],
+            "scopePolicy":_vehicle_twin_scope_policy(),
+            "interpretationPolicy":"Twin comparison is deterministic operational-state differencing, not physical similarity or shared-failure probability."}
+
+
+@router.get("/twins/{vehicle_id}")
+def vehicle_twin_detail(vehicle_id:str,
+                        run_id:int|None=Query(default=None,ge=1),
+                        db:Session=Depends(db_session)) -> dict:
+    _, run = _resolve_vehicle_twin_run(db, run_id)
+    experiment_id, run, twin = _current_vehicle_twin_record(
+        db,
+        vehicle_id,
+        selected_run=run,
+    )
+    twin["persistedTwinSnapshots"] = int(db.scalar(select(func.count(DiagnosticVehicleTwinSnapshot.id)).where(
+        DiagnosticVehicleTwinSnapshot.run_id==run.id,
+        DiagnosticVehicleTwinSnapshot.experiment_id==experiment_id,
+        DiagnosticVehicleTwinSnapshot.vehicle_id==vehicle_id,
+    )) or 0)
+    twin["scopePolicy"]=_vehicle_twin_scope_policy()
+    twin["interpretationPolicy"]="Unified current-run operational evidence; not private failure truth or a physics-based digital twin."
+    twin["generatedAt"]=datetime.now(timezone.utc).isoformat()
+    return twin
+
+
+@router.get("/twins/{vehicle_id}/timeline")
+def vehicle_twin_timeline(vehicle_id:str,
+                          limit:int=Query(default=200,ge=1,le=500),
+                          run_id:int|None=Query(default=None,ge=1),
+                          db:Session=Depends(db_session)) -> dict:
+    _, run = _resolve_vehicle_twin_run(db, run_id)
+    experiment_id, run, _ = _current_vehicle_twin_record(
+        db,
+        vehicle_id,
+        selected_run=run,
+    )
+    items=_vehicle_twin_timeline_items(db,experiment_id,run,vehicle_id)
+    selected=items[-limit:]
+    return {"runId":run.id,"experimentId":experiment_id,"vehicleId":vehicle_id,"rulesVersion":VEHICLE_TWIN_RULES_VERSION,
+            "totalItems":len(items),"returned":len(selected),"items":selected,"scopePolicy":_vehicle_twin_scope_policy(),
+            "interpretationPolicy":"Merged operational chronology. CANONICAL_PREDICTION is the persisted run scoring snapshot; REPLAY_STATE entries are observable-history reconstructions and may differ numerically at the same anchor. Sequence does not imply physical causality."}
+
+
+@router.get("/twins/{vehicle_id}/graph")
+def vehicle_twin_graph(vehicle_id:str,
+                       run_id:int|None=Query(default=None,ge=1),
+                       db:Session=Depends(db_session)) -> dict:
+    _, run = _resolve_vehicle_twin_run(db, run_id)
+    experiment_id, run, t = _current_vehicle_twin_record(
+        db,
+        vehicle_id,
+        selected_run=run,
+    )
+    m,d,c,p,ma,a,f,cv=(t["modelState"],t["diagnosticState"],t["caseState"],t["prognosticState"],t["maintenanceState"],t["automationState"],t["fleetDecisionState"],t["coverageState"])
+    nodes=[
+        {"id":"model","layer":"MODEL","label":m.get("topClass"),"present":True},
+        {"id":"episode","layer":"DIAGNOSTIC","label":d.get("episodeState"),"present":d.get("episodeId") is not None},
+        {"id":"case","layer":"CASE","label":c.get("status"),"present":c.get("caseId") is not None},
+        {"id":"prognostic","layer":"PROGNOSTIC","label":p.get("maintenanceTier"),"present":p.get("maintenanceTier") is not None},
+        {"id":"maintenance","layer":"MAINTENANCE","label":ma.get("state"),"present":ma.get("planId") is not None},
+        {"id":"automation","layer":"AUTOMATION","label":a.get("currentStatus"),"present":bool(a.get("actionIds"))},
+        {"id":"fleet-decision","layer":"FLEET_DECISION","label":f.get("decisionState"),"present":True},
+        {"id":"coverage","layer":"COVERAGE","label":f'{cv.get("coverageGapCount",0)} gaps',"present":True},
+    ]
+    present={n["id"]:n["present"] for n in nodes}
+    candidates=[("model","episode","TEMPORALIZED_AS"),("episode","case","OPERATIONALIZED_AS"),("case","prognostic","REVIEWED_BY"),
+                ("prognostic","maintenance","INFORMS"),("prognostic","automation","EVALUATED_BY"),("maintenance","fleet-decision","SYNTHESIZED_IN"),
+                ("automation","fleet-decision","SYNTHESIZED_IN"),("fleet-decision","coverage","ASSESSED_FOR")]
+    edges=[{"from":x,"to":y,"relation":r} for x,y,r in candidates if present.get(x) and present.get(y)]
+    return {"runId":run.id,"experimentId":experiment_id,"vehicleId":vehicle_id,"rulesVersion":VEHICLE_TWIN_RULES_VERSION,
+            "nodes":nodes,"edges":edges,"interpretationPolicy":"This graph is data/workflow lineage, not a causal component graph or physical dependency proof."}
+
+
+@router.get("/twins/{vehicle_id}/evidence")
+def vehicle_twin_evidence(vehicle_id:str,
+                          run_id:int|None=Query(default=None,ge=1),
+                          db:Session=Depends(db_session)) -> dict:
+    _, run = _resolve_vehicle_twin_run(db, run_id)
+    experiment_id, run, t = _current_vehicle_twin_record(
+        db,
+        vehicle_id,
+        selected_run=run,
+    )
+    replay=int(db.scalar(select(func.count(DiagnosticReplayPoint.id)).where(DiagnosticReplayPoint.run_id==run.id,DiagnosticReplayPoint.experiment_id==experiment_id,DiagnosticReplayPoint.vehicle_id==vehicle_id)) or 0)
+    events=int(db.scalar(select(func.count(DiagnosticEvent.id)).where(DiagnosticEvent.run_id==run.id,DiagnosticEvent.experiment_id==experiment_id,DiagnosticEvent.vehicle_id==vehicle_id)) or 0)
+    return {"runId":run.id,"experimentId":experiment_id,"vehicleId":vehicle_id,"rulesVersion":VEHICLE_TWIN_RULES_VERSION,
+            "observableModelEvidence":t["modelState"]["observableEvidence"],
+            "counts":{"replayPoints":replay,"diagnosticEvents":events,"episodes":1 if t["diagnosticState"]["episodeId"] else 0,
+                      "cases":1 if t["caseState"]["caseId"] else 0,"maintenancePlans":1 if t["maintenanceState"]["planId"] else 0,
+                      "automationActions":len(t["automationState"]["actionIds"]),"fleetSnapshotLinks":len(t["fleetSnapshotLinks"])},
+            "sourceVersions":t["sourceVersions"],
+            "truthBoundary":{"usesPrivateFailureTruth":False,"failureMarkersExposed":False,
+                             "operationalModelHypothesesAreFailureTruth":False,"observedSignalsAreCausalAttribution":False},
+            "interpretationPolicy":"Observable/persisted evidence inventory; private simulated failure truth is deliberately excluded."}
+
+
+@router.post("/twins/{vehicle_id}/snapshots")
+def create_vehicle_twin_snapshot(vehicle_id:str,
+                                 request:VehicleTwinSnapshotCreate,
+                                 run_id:int|None=Query(default=None,ge=1),
+                                 db:Session=Depends(db_session)) -> dict:
+    _, run = _resolve_vehicle_twin_run(db, run_id)
+    experiment_id, run, twin = _current_vehicle_twin_record(
+        db,
+        vehicle_id,
+        selected_run=run,
+    )
+    canonical=canonical_twin_state(twin)
+    raw=json.dumps(canonical,sort_keys=True,separators=(",",":"))
+    state_hash=hashlib.sha256(raw.encode()).hexdigest()
+    existing=db.execute(select(DiagnosticVehicleTwinSnapshot).where(
+        DiagnosticVehicleTwinSnapshot.run_id==run.id,DiagnosticVehicleTwinSnapshot.experiment_id==experiment_id,
+        DiagnosticVehicleTwinSnapshot.vehicle_id==vehicle_id,DiagnosticVehicleTwinSnapshot.rules_version==VEHICLE_TWIN_RULES_VERSION,
+        DiagnosticVehicleTwinSnapshot.state_hash==state_hash).limit(1)).scalar_one_or_none()
+    if existing:
+        return {"created":False,"snapshot":_vehicle_twin_snapshot_payload(existing),
+                "interpretationPolicy":"Identical operational twin state already has a checkpoint. No diagnostic or workflow evidence was modified."}
+    row=DiagnosticVehicleTwinSnapshot(run_id=run.id,experiment_id=experiment_id,vehicle_id=vehicle_id,
+        rules_version=VEHICLE_TWIN_RULES_VERSION,created_at=datetime.now(timezone.utc),actor=request.actor,
+        label=request.label.strip() if request.label and request.label.strip() else None,state_hash=state_hash,twin_json=raw)
+    db.add(row); db.commit(); db.refresh(row)
+    return {"created":True,"snapshot":_vehicle_twin_snapshot_payload(row),"scopePolicy":_vehicle_twin_scope_policy(),
+            "interpretationPolicy":"Twin snapshots persist derived operational state only. They do not rewrite predictions, replay, events, episodes, cases, maintenance, automation, fleet-decision evidence, model artifacts, benchmark evidence, or private failure truth."}
+
+
+@router.get("/twins/{vehicle_id}/snapshots")
+def vehicle_twin_snapshots(vehicle_id:str,
+                           limit:int=Query(default=20,ge=1,le=100),
+                           run_id:int|None=Query(default=None,ge=1),
+                           db:Session=Depends(db_session)) -> dict:
+    _, run = _resolve_vehicle_twin_run(db, run_id)
+    experiment_id, run, _ = _current_vehicle_twin_record(
+        db,
+        vehicle_id,
+        selected_run=run,
+    )
+    total=int(db.scalar(select(func.count(DiagnosticVehicleTwinSnapshot.id)).where(DiagnosticVehicleTwinSnapshot.run_id==run.id,DiagnosticVehicleTwinSnapshot.experiment_id==experiment_id,DiagnosticVehicleTwinSnapshot.vehicle_id==vehicle_id)) or 0)
+    rows=db.execute(select(DiagnosticVehicleTwinSnapshot).where(DiagnosticVehicleTwinSnapshot.run_id==run.id,DiagnosticVehicleTwinSnapshot.experiment_id==experiment_id,DiagnosticVehicleTwinSnapshot.vehicle_id==vehicle_id).order_by(desc(DiagnosticVehicleTwinSnapshot.created_at),desc(DiagnosticVehicleTwinSnapshot.id)).limit(limit)).scalars().all()
+    return {"runId":run.id,"experimentId":experiment_id,"vehicleId":vehicle_id,"rulesVersion":VEHICLE_TWIN_RULES_VERSION,
+            "total":total,"returned":len(rows),"snapshots":[_vehicle_twin_snapshot_payload(r) for r in rows],"scopePolicy":_vehicle_twin_scope_policy()}
 
 @router.get("/summary")
 def diagnostics_summary(
