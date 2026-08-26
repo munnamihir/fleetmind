@@ -430,3 +430,76 @@ class DiagnosticInvestigationView(Base):
             "updated_at",
         ),
     )
+
+
+class DiagnosticMaintenancePlan(Base):
+    __tablename__ = "diagnostic_maintenance_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    case_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_cases.id", ondelete="CASCADE"),
+        index=True,
+    )
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
+    rules_version: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    state: Mapped[str] = mapped_column(String(32), index=True)
+    owner: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    target_mileage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "case_id",
+            name="uq_diagnostic_maintenance_plan_run_case",
+        ),
+        Index(
+            "ix_diagnostic_maintenance_plan_run_state_updated",
+            "run_id",
+            "state",
+            "updated_at",
+        ),
+    )
+
+
+class DiagnosticMaintenanceActivity(Base):
+    __tablename__ = "diagnostic_maintenance_activities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_maintenance_plans.id", ondelete="CASCADE"),
+        index=True,
+    )
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    case_id: Mapped[int] = mapped_column(Integer, index=True)
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    activity_type: Mapped[str] = mapped_column(String(48), index=True)
+    actor: Mapped[str] = mapped_column(String(64), default="operator")
+    from_value: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    to_value: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    note_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_diagnostic_maintenance_activity_plan_created",
+            "plan_id",
+            "created_at",
+        ),
+        Index(
+            "ix_diagnostic_maintenance_activity_run_created",
+            "run_id",
+            "created_at",
+        ),
+    )

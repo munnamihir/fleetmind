@@ -12,6 +12,22 @@ from fleetmind_common.db import SessionLocal
 from fleetmind_common.diagnostic_event_rules import (
     DIAGNOSTIC_EVENT_TYPES,
 )
+from fleetmind_common.diagnostic_prognostic_rules import (
+    FIT_WINDOW_POINTS,
+    MAINTENANCE_ACTIVITY_CREATED,
+    MAINTENANCE_ACTIVITY_NOTE_ADDED,
+    MAINTENANCE_ACTIVITY_OWNER_CHANGED,
+    MAINTENANCE_ACTIVITY_STATE_CHANGED,
+    MAINTENANCE_ACTIVITY_TARGET_CHANGED,
+    MAINTENANCE_STATES,
+    MIN_TRAJECTORY_POINTS,
+    PROGNOSTIC_RULES_VERSION,
+    TARGET_HYPOTHESIS_CONFIDENCE,
+    backtest_threshold_horizon,
+    estimate_threshold_horizon,
+    fit_trajectory,
+    maintenance_priority,
+)
 from fleetmind_common.diagnostic_pattern_rules import (
     DEFAULT_CLUSTER_MIN_CASES,
     MAX_CLUSTER_CASE_IDS,
@@ -35,6 +51,8 @@ from fleetmind_common.diagnostic_store import (
     DiagnosticCase,
     DiagnosticCaseActivity,
     DiagnosticInvestigationView,
+    DiagnosticMaintenanceActivity,
+    DiagnosticMaintenancePlan,
     DiagnosticWatchlistEntry,
     DiagnosticEpisode,
     DiagnosticEvent,
@@ -2296,6 +2314,861 @@ def delete_diagnostic_investigation_view(
     db.delete(row)
     db.commit()
     return {"deleted": True, "viewId": view_id}
+
+
+
+
+class DiagnosticMaintenancePlanUpdate(BaseModel):
+    state: str | None = None
+    owner: str | None = Field(default=None, max_length=64)
+    clear_owner: bool = False
+    target_mileage: float | None = Field(default=None, ge=0.0)
+    clear_target_mileage: bool = False
+    note: str | None = Field(default=None, max_length=2000)
+    actor: str = Field(default="operator", min_length=1, max_length=64)
+
+
+def _hypothesis_confidence(
+    point: DiagnosticReplayPoint,
+    hypothesis_class: str,
+) -> float | None:
+    for item in _json_list(point.hypotheses_json):
+        if not isinstance(item, dict):
+            continue
+        if item.get("class") != hypothesis_class:
+            continue
+        value = item.get("confidence")
+        if isinstance(value, (int, float)):
+            return float(value)
+
+    if point.top_class == hypothesis_class:
+        return float(point.top_confidence)
+    return None
+
+
+def _trajectory_payload(
+    case: DiagnosticCase,
+    points: list[DiagnosticReplayPoint],
+    *,
+    watchlisted: bool,
+    plan: DiagnosticMaintenancePlan | None,
+) -> dict:
+    trajectory = []
+    for point in points:
+        # Operational prognostics are constrained to the persisted
+        # diagnostic-case evidence window. Run-frozen replay anchors before
+        # the episode begins or after its latest evidence must not influence
+        # the current case trajectory. Later replay remains available only to
+        # the explicitly historical backtest endpoint.
+        if (
+            float(point.anchor_mileage) < float(case.start_mileage)
+            or float(point.anchor_mileage) > float(case.latest_mileage)
+        ):
+            continue
+
+        confidence = _hypothesis_confidence(
+            point,
+            case.hypothesis_class,
+        )
+        if confidence is None:
+            continue
+        trajectory.append(
+            {
+                "timestamp": point.anchor_timestamp.isoformat(),
+                "mileage": round(float(point.anchor_mileage), 1),
+                "confidence": round(float(confidence), 6),
+            }
+        )
+
+    fit = fit_trajectory(
+        [
+            (item["mileage"], item["confidence"])
+            for item in trajectory[-FIT_WINDOW_POINTS:]
+        ]
+    )
+
+    horizon = None
+    if fit is not None:
+        horizon = estimate_threshold_horizon(
+            latest_confidence=fit["latestConfidence"],
+            slope_per_1k_miles=fit["slopePer1kMiles"],
+            slope_std_error_per_1k_miles=fit[
+                "slopeStdErrorPer1kMiles"
+            ],
+        )
+
+    priority = maintenance_priority(
+        review_priority=case.review_priority,
+        episode_state=case.episode_state_at_creation,
+        latest_confidence=(
+            fit["latestConfidence"]
+            if fit is not None
+            else case.latest_confidence
+        ),
+        slope_per_1k_miles=(
+            fit["slopePer1kMiles"]
+            if fit is not None
+            else None
+        ),
+        estimated_miles_to_threshold=(
+            horizon["estimatedMilesToThreshold"]
+            if horizon is not None
+            else None
+        ),
+        watchlisted=watchlisted,
+    )
+
+    return {
+        "caseId": case.id,
+        "episodeId": case.episode_id,
+        "vehicleId": case.vehicle_id,
+        "hypothesisClass": case.hypothesis_class,
+        "caseStatus": case.status,
+        "reviewPriority": case.review_priority,
+        "episodeState": case.episode_state_at_creation,
+        "watchlisted": watchlisted,
+        "trajectoryEligible": len(trajectory) >= MIN_TRAJECTORY_POINTS,
+        "trajectoryPointCount": len(trajectory),
+        "trajectory": trajectory,
+        "fit": (
+            {
+                key: (
+                    round(float(value), 6)
+                    if isinstance(value, float)
+                    else value
+                )
+                for key, value in fit.items()
+            }
+            if fit is not None
+            else None
+        ),
+        "experimentalHorizon": (
+            {
+                key: (
+                    round(float(value), 1)
+                    if isinstance(value, float)
+                    else value
+                )
+                for key, value in horizon.items()
+            }
+            if horizon is not None
+            else None
+        ),
+        **priority,
+        "maintenancePlan": (
+            _maintenance_plan_payload(plan)
+            if plan is not None
+            else None
+        ),
+    }
+
+
+def _current_prognostic_records(
+    db: Session,
+) -> tuple[str, DiagnosticModelRun, list[dict]]:
+    experiment_id, run = _require_current_run(db)
+
+    cases = db.execute(
+        select(DiagnosticCase)
+        .where(
+            DiagnosticCase.run_id == run.id,
+            DiagnosticCase.experiment_id == experiment_id,
+        )
+        .order_by(DiagnosticCase.id)
+    ).scalars().all()
+
+    vehicle_ids = sorted({row.vehicle_id for row in cases})
+    replay_rows = (
+        db.execute(
+            select(DiagnosticReplayPoint)
+            .where(
+                DiagnosticReplayPoint.run_id == run.id,
+                DiagnosticReplayPoint.experiment_id == experiment_id,
+                DiagnosticReplayPoint.vehicle_id.in_(vehicle_ids),
+            )
+            .order_by(
+                DiagnosticReplayPoint.vehicle_id,
+                DiagnosticReplayPoint.anchor_mileage,
+                DiagnosticReplayPoint.id,
+            )
+        ).scalars().all()
+        if vehicle_ids
+        else []
+    )
+
+    by_vehicle: dict[str, list[DiagnosticReplayPoint]] = {}
+    for point in replay_rows:
+        by_vehicle.setdefault(point.vehicle_id, []).append(point)
+
+    watchlisted_case_ids = set(
+        db.execute(
+            select(DiagnosticWatchlistEntry.case_id).where(
+                DiagnosticWatchlistEntry.run_id == run.id,
+                DiagnosticWatchlistEntry.experiment_id == experiment_id,
+            )
+        ).scalars().all()
+    )
+
+    plans = db.execute(
+        select(DiagnosticMaintenancePlan).where(
+            DiagnosticMaintenancePlan.run_id == run.id,
+            DiagnosticMaintenancePlan.experiment_id == experiment_id,
+        )
+    ).scalars().all()
+    plan_map = {row.case_id: row for row in plans}
+
+    records = [
+        _trajectory_payload(
+            case,
+            by_vehicle.get(case.vehicle_id, []),
+            watchlisted=case.id in watchlisted_case_ids,
+            plan=plan_map.get(case.id),
+        )
+        for case in cases
+    ]
+
+    return experiment_id, run, records
+
+
+def _maintenance_plan_payload(
+    row: DiagnosticMaintenancePlan,
+) -> dict:
+    return {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "caseId": row.case_id,
+        "vehicleId": row.vehicle_id,
+        "rulesVersion": row.rules_version,
+        "state": row.state,
+        "owner": row.owner,
+        "targetMileage": (
+            round(float(row.target_mileage), 1)
+            if row.target_mileage is not None
+            else None
+        ),
+        "note": row.note,
+        "createdAt": row.created_at.isoformat(),
+        "updatedAt": row.updated_at.isoformat(),
+    }
+
+
+def _maintenance_activity_payload(
+    row: DiagnosticMaintenanceActivity,
+) -> dict:
+    return {
+        "id": row.id,
+        "planId": row.plan_id,
+        "caseId": row.case_id,
+        "vehicleId": row.vehicle_id,
+        "createdAt": row.created_at.isoformat(),
+        "activityType": row.activity_type,
+        "actor": row.actor,
+        "fromValue": row.from_value,
+        "toValue": row.to_value,
+        "note": row.note_text,
+    }
+
+
+@router.get("/prognostics/summary")
+def diagnostic_prognostics_summary(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_prognostic_records(db)
+
+    tier_counts = {
+        tier: sum(
+            1
+            for row in records
+            if row["maintenanceTier"] == tier
+        )
+        for tier in (
+            "URGENT_REVIEW",
+            "PLAN_SERVICE",
+            "MONITOR",
+            "ROUTINE_REVIEW",
+        )
+    }
+
+    eligible = [
+        row
+        for row in records
+        if row["trajectoryEligible"] and row["fit"] is not None
+    ]
+    escalating = [
+        row
+        for row in eligible
+        if float(row["fit"]["slopePer1kMiles"]) > 0.0
+    ]
+    horizon_available = [
+        row
+        for row in eligible
+        if row["experimentalHorizon"] is not None
+        and row["experimentalHorizon"][
+            "estimatedMilesToThreshold"
+        ] is not None
+    ]
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": PROGNOSTIC_RULES_VERSION,
+        "targetHypothesisConfidence": TARGET_HYPOTHESIS_CONFIDENCE,
+        "totalCases": len(records),
+        "eligibleTrajectories": len(eligible),
+        "escalatingTrajectories": len(escalating),
+        "experimentalHorizonsAvailable": len(horizon_available),
+        "plannedCases": sum(
+            1
+            for row in records
+            if row["maintenancePlan"] is not None
+        ),
+        "byMaintenanceTier": [
+            {"tier": tier, "cases": count}
+            for tier, count in tier_counts.items()
+        ],
+        "scopePolicy": {
+            "currentRunOnly": True,
+            "exactExperimentOnly": True,
+            "runFrozenReplayOnly": True,
+            "usesTelemetry": False,
+            "usesPostRunTelemetry": False,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+            "modelRetrained": False,
+            "benchmarkModified": False,
+        },
+        "interpretationPolicy": (
+            "Prognostic horizons extrapolate persisted run-frozen model-"
+            "hypothesis confidence trajectories toward a configured model "
+            "confidence threshold. They are experimental investigation "
+            "signals, not physical remaining useful life, failure-time "
+            "estimates, calibrated failure risk, attribution, or causal proof."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/prognostics/queue")
+def diagnostic_maintenance_queue(
+    limit: int = Query(default=50, ge=1, le=200),
+    tier: str | None = Query(default=None),
+    hypothesis_class: str | None = Query(default=None),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_prognostic_records(db)
+
+    filtered = [
+        row
+        for row in records
+        if row["caseStatus"] != CASE_CLOSED
+    ]
+    if tier is not None:
+        filtered = [
+            row
+            for row in filtered
+            if row["maintenanceTier"] == tier
+        ]
+    if hypothesis_class is not None:
+        filtered = [
+            row
+            for row in filtered
+            if row["hypothesisClass"] == hypothesis_class
+        ]
+
+    filtered.sort(
+        key=lambda row: (
+            float(row["priorityScore"]),
+            float(
+                row["fit"]["latestConfidence"]
+                if row["fit"] is not None
+                else 0.0
+            ),
+        ),
+        reverse=True,
+    )
+
+    compact = []
+    for row in filtered[:limit]:
+        compact.append(
+            {
+                key: value
+                for key, value in row.items()
+                if key != "trajectory"
+            }
+        )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": PROGNOSTIC_RULES_VERSION,
+        "totalMatched": len(filtered),
+        "returned": len(compact),
+        "filters": {
+            "tier": tier,
+            "hypothesisClass": hypothesis_class,
+        },
+        "queue": compact,
+        "interpretationPolicy": (
+            "Queue score and review windows are deterministic operational "
+            "triage heuristics. They are not physical-failure probabilities "
+            "or mandatory service intervals."
+        ),
+    }
+
+
+@router.get("/prognostics/cases/{case_id}")
+def diagnostic_case_prognostics(
+    case_id: int,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, case = _require_current_case(case_id, db)
+    _, _, records = _current_prognostic_records(db)
+    record = next(
+        (row for row in records if row["caseId"] == case.id),
+        None,
+    )
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Prognostic record unavailable for current case",
+        )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": PROGNOSTIC_RULES_VERSION,
+        "targetHypothesisConfidence": TARGET_HYPOTHESIS_CONFIDENCE,
+        "prognostic": record,
+        "interpretationPolicy": (
+            "The trajectory is the selected case hypothesis confidence across "
+            "persisted run-frozen replay anchors. Extrapolated miles are not "
+            "physical remaining useful life or a failure-time estimate."
+        ),
+    }
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(float(value) for value in values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+@router.get("/prognostics/backtest")
+def diagnostic_prognostic_backtest(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    cases = db.execute(
+        select(DiagnosticCase)
+        .where(
+            DiagnosticCase.run_id == run.id,
+            DiagnosticCase.experiment_id == experiment_id,
+        )
+        .order_by(DiagnosticCase.id)
+    ).scalars().all()
+
+    vehicle_ids = sorted({row.vehicle_id for row in cases})
+    points = (
+        db.execute(
+            select(DiagnosticReplayPoint)
+            .where(
+                DiagnosticReplayPoint.run_id == run.id,
+                DiagnosticReplayPoint.experiment_id == experiment_id,
+                DiagnosticReplayPoint.vehicle_id.in_(vehicle_ids),
+            )
+            .order_by(
+                DiagnosticReplayPoint.vehicle_id,
+                DiagnosticReplayPoint.anchor_mileage,
+                DiagnosticReplayPoint.id,
+            )
+        ).scalars().all()
+        if vehicle_ids
+        else []
+    )
+    by_vehicle: dict[str, list[DiagnosticReplayPoint]] = {}
+    for point in points:
+        by_vehicle.setdefault(point.vehicle_id, []).append(point)
+
+    evaluations = []
+    for case in cases:
+        trajectory = []
+        for point in by_vehicle.get(case.vehicle_id, []):
+            confidence = _hypothesis_confidence(
+                point,
+                case.hypothesis_class,
+            )
+            if confidence is None:
+                continue
+            trajectory.append(
+                (float(point.anchor_mileage), float(confidence))
+            )
+
+        result = backtest_threshold_horizon(trajectory)
+        if result is None:
+            continue
+        evaluations.append(
+            {
+                "hypothesisClass": case.hypothesis_class,
+                **result,
+            }
+        )
+
+    paired_errors = [
+        float(row["absoluteErrorMiles"])
+        for row in evaluations
+        if row["absoluteErrorMiles"] is not None
+    ]
+    predicted_crossings = sum(
+        1 for row in evaluations if row["predictedCrossing"]
+    )
+    observed_crossings = sum(
+        1 for row in evaluations if row["observedFutureCrossing"]
+    )
+
+    class_rows = []
+    for hypothesis_class in sorted(
+        {row["hypothesisClass"] for row in evaluations}
+    ):
+        class_evals = [
+            row
+            for row in evaluations
+            if row["hypothesisClass"] == hypothesis_class
+        ]
+        errors = [
+            float(row["absoluteErrorMiles"])
+            for row in class_evals
+            if row["absoluteErrorMiles"] is not None
+        ]
+        class_rows.append(
+            {
+                "hypothesisClass": hypothesis_class,
+                "evaluatedCases": len(class_evals),
+                "pairedCrossings": len(errors),
+                "medianAbsoluteErrorMiles": (
+                    round(float(_median(errors)), 1)
+                    if errors
+                    else None
+                ),
+            }
+        )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": PROGNOSTIC_RULES_VERSION,
+        "targetHypothesisConfidence": TARGET_HYPOTHESIS_CONFIDENCE,
+        "evaluatedCases": len(evaluations),
+        "predictedCrossings": predicted_crossings,
+        "observedFutureCrossings": observed_crossings,
+        "pairedCrossings": len(paired_errors),
+        "medianAbsoluteErrorMiles": (
+            round(float(_median(paired_errors)), 1)
+            if paired_errors
+            else None
+        ),
+        "meanAbsoluteErrorMiles": (
+            round(
+                sum(paired_errors) / len(paired_errors),
+                1,
+            )
+            if paired_errors
+            else None
+        ),
+        "within2500Miles": (
+            round(
+                sum(1 for error in paired_errors if error <= 2500.0)
+                / len(paired_errors),
+                6,
+            )
+            if paired_errors
+            else None
+        ),
+        "byClass": class_rows,
+        "scopePolicy": {
+            "runFrozenReplayOnly": True,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+            "evaluatesModelThresholdCrossing": True,
+            "evaluatesPhysicalFailure": False,
+        },
+        "interpretationPolicy": (
+            "Backtesting compares early replay-based extrapolations with later "
+            "crossings of the same model-hypothesis confidence threshold. It "
+            "does not evaluate physical failures or remaining useful life."
+        ),
+    }
+
+
+@router.get("/maintenance/plans")
+def diagnostic_maintenance_plans(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    rows = db.execute(
+        select(DiagnosticMaintenancePlan)
+        .where(
+            DiagnosticMaintenancePlan.run_id == run.id,
+            DiagnosticMaintenancePlan.experiment_id == experiment_id,
+        )
+        .order_by(
+            desc(DiagnosticMaintenancePlan.updated_at),
+            desc(DiagnosticMaintenancePlan.id),
+        )
+    ).scalars().all()
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "plans": [_maintenance_plan_payload(row) for row in rows],
+        "total": len(rows),
+    }
+
+
+@router.get("/maintenance/plans/{case_id}")
+def diagnostic_maintenance_plan_detail(
+    case_id: int,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, case = _require_current_case(case_id, db)
+    plan = db.execute(
+        select(DiagnosticMaintenancePlan)
+        .where(
+            DiagnosticMaintenancePlan.run_id == run.id,
+            DiagnosticMaintenancePlan.experiment_id == experiment_id,
+            DiagnosticMaintenancePlan.case_id == case.id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if plan is None:
+        return {
+            "runId": run.id,
+            "experimentId": experiment_id,
+            "caseId": case.id,
+            "plan": None,
+            "activities": [],
+        }
+
+    activities = db.execute(
+        select(DiagnosticMaintenanceActivity)
+        .where(
+            DiagnosticMaintenanceActivity.plan_id == plan.id,
+            DiagnosticMaintenanceActivity.run_id == run.id,
+        )
+        .order_by(
+            desc(DiagnosticMaintenanceActivity.created_at),
+            desc(DiagnosticMaintenanceActivity.id),
+        )
+    ).scalars().all()
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "caseId": case.id,
+        "plan": _maintenance_plan_payload(plan),
+        "activities": [
+            _maintenance_activity_payload(row)
+            for row in activities
+        ],
+    }
+
+
+@router.put("/maintenance/plans/{case_id}")
+def upsert_diagnostic_maintenance_plan(
+    case_id: int,
+    request: DiagnosticMaintenancePlanUpdate,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, case = _require_current_case(case_id, db)
+
+    if request.state is not None and request.state not in MAINTENANCE_STATES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported maintenance plan state",
+                "allowed": list(MAINTENANCE_STATES),
+            },
+        )
+
+    now = datetime.now(timezone.utc)
+    plan = db.execute(
+        select(DiagnosticMaintenancePlan)
+        .where(
+            DiagnosticMaintenancePlan.run_id == run.id,
+            DiagnosticMaintenancePlan.case_id == case.id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    created = plan is None
+    if plan is None:
+        plan = DiagnosticMaintenancePlan(
+            run_id=run.id,
+            experiment_id=experiment_id,
+            case_id=case.id,
+            vehicle_id=case.vehicle_id,
+            rules_version=PROGNOSTIC_RULES_VERSION,
+            created_at=now,
+            updated_at=now,
+            state=request.state or "REVIEW",
+            owner=(
+                request.owner.strip()
+                if request.owner
+                else None
+            ),
+            target_mileage=request.target_mileage,
+            note=(
+                request.note.strip()
+                if request.note
+                else None
+            ),
+        )
+        db.add(plan)
+        db.flush()
+        db.add(
+            DiagnosticMaintenanceActivity(
+                plan_id=plan.id,
+                run_id=run.id,
+                experiment_id=experiment_id,
+                case_id=case.id,
+                vehicle_id=case.vehicle_id,
+                created_at=now,
+                activity_type=MAINTENANCE_ACTIVITY_CREATED,
+                actor=request.actor,
+                from_value=None,
+                to_value=plan.state,
+                note_text=plan.note,
+            )
+        )
+    else:
+        previous_state = plan.state
+        previous_owner = plan.owner
+        previous_target = plan.target_mileage
+
+        if request.state is not None:
+            plan.state = request.state
+        if request.clear_owner:
+            plan.owner = None
+        elif request.owner is not None:
+            plan.owner = request.owner.strip() or None
+        if request.clear_target_mileage:
+            plan.target_mileage = None
+        elif request.target_mileage is not None:
+            plan.target_mileage = request.target_mileage
+        if request.note is not None:
+            stripped_note = request.note.strip()
+            plan.note = stripped_note or None
+
+        plan.updated_at = now
+        db.add(plan)
+
+        if previous_state != plan.state:
+            db.add(
+                DiagnosticMaintenanceActivity(
+                    plan_id=plan.id,
+                    run_id=run.id,
+                    experiment_id=experiment_id,
+                    case_id=case.id,
+                    vehicle_id=case.vehicle_id,
+                    created_at=now,
+                    activity_type=MAINTENANCE_ACTIVITY_STATE_CHANGED,
+                    actor=request.actor,
+                    from_value=previous_state,
+                    to_value=plan.state,
+                    note_text=None,
+                )
+            )
+        if previous_owner != plan.owner:
+            db.add(
+                DiagnosticMaintenanceActivity(
+                    plan_id=plan.id,
+                    run_id=run.id,
+                    experiment_id=experiment_id,
+                    case_id=case.id,
+                    vehicle_id=case.vehicle_id,
+                    created_at=now,
+                    activity_type=MAINTENANCE_ACTIVITY_OWNER_CHANGED,
+                    actor=request.actor,
+                    from_value=previous_owner,
+                    to_value=plan.owner,
+                    note_text=None,
+                )
+            )
+        if previous_target != plan.target_mileage:
+            db.add(
+                DiagnosticMaintenanceActivity(
+                    plan_id=plan.id,
+                    run_id=run.id,
+                    experiment_id=experiment_id,
+                    case_id=case.id,
+                    vehicle_id=case.vehicle_id,
+                    created_at=now,
+                    activity_type=MAINTENANCE_ACTIVITY_TARGET_CHANGED,
+                    actor=request.actor,
+                    from_value=(
+                        str(previous_target)
+                        if previous_target is not None
+                        else None
+                    ),
+                    to_value=(
+                        str(plan.target_mileage)
+                        if plan.target_mileage is not None
+                        else None
+                    ),
+                    note_text=None,
+                )
+            )
+        if request.note is not None and request.note.strip():
+            db.add(
+                DiagnosticMaintenanceActivity(
+                    plan_id=plan.id,
+                    run_id=run.id,
+                    experiment_id=experiment_id,
+                    case_id=case.id,
+                    vehicle_id=case.vehicle_id,
+                    created_at=now,
+                    activity_type=MAINTENANCE_ACTIVITY_NOTE_ADDED,
+                    actor=request.actor,
+                    from_value=None,
+                    to_value=None,
+                    note_text=request.note.strip(),
+                )
+            )
+
+    db.commit()
+    db.refresh(plan)
+
+    activities = db.execute(
+        select(DiagnosticMaintenanceActivity)
+        .where(
+            DiagnosticMaintenanceActivity.plan_id == plan.id,
+            DiagnosticMaintenanceActivity.run_id == run.id,
+        )
+        .order_by(
+            desc(DiagnosticMaintenanceActivity.created_at),
+            desc(DiagnosticMaintenanceActivity.id),
+        )
+    ).scalars().all()
+
+    return {
+        "created": created,
+        "plan": _maintenance_plan_payload(plan),
+        "activities": [
+            _maintenance_activity_payload(row)
+            for row in activities
+        ],
+        "interpretationPolicy": (
+            "Maintenance plans are operator workflow metadata. Creating or "
+            "updating a plan does not rewrite diagnostic replay, events, "
+            "episodes, cases, model artifacts, or benchmark evidence."
+        ),
+    }
 
 
 @router.get("/summary")
