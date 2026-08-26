@@ -369,3 +369,64 @@ class DiagnosticCaseActivity(Base):
             "created_at",
         ),
     )
+
+
+class DiagnosticWatchlistEntry(Base):
+    __tablename__ = "diagnostic_watchlist_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    case_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_cases.id", ondelete="CASCADE"),
+        index=True,
+    )
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    actor: Mapped[str] = mapped_column(String(64), default="operator")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "case_id",
+            name="uq_diagnostic_watchlist_run_case",
+        ),
+        Index(
+            "ix_diagnostic_watchlist_run_created",
+            "run_id",
+            "created_at",
+        ),
+    )
+
+
+class DiagnosticInvestigationView(Base):
+    __tablename__ = "diagnostic_investigation_views"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    actor: Mapped[str] = mapped_column(String(64), default="operator")
+    name: Mapped[str] = mapped_column(String(96))
+    filters_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "name",
+            name="uq_diagnostic_investigation_view_run_name",
+        ),
+        Index(
+            "ix_diagnostic_investigation_view_run_updated",
+            "run_id",
+            "updated_at",
+        ),
+    )

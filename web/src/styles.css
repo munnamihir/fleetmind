@@ -476,3 +476,261 @@ header { display:flex; justify-content:space-between; gap:30px; align-items:flex
   .diagnosticCaseEvidenceGrid { grid-template-columns:1fr; }
   .diagnosticCaseHero { flex-direction:column; }
 }
+
+
+/* Phase 6.11 — Fleet Pattern & Investigation Suite */
+.fleetPatternPanel { margin-top:10px; min-height:auto; }
+.fleetPatternPolicy { max-width:980px; margin:8px 0 16px; }
+.fleetPatternMetrics {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+  margin-bottom:10px;
+}
+.fleetPatternMetric {
+  padding:14px;
+  border:1px solid #20252b;
+  border-radius:6px;
+  background:#0d1013;
+}
+.fleetPatternMetric span,
+.fleetPatternMetric strong { display:block; }
+.fleetPatternMetric span {
+  color:#646e79;
+  font-size:8px;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+}
+.fleetPatternMetric strong {
+  margin-top:5px;
+  font-size:22px;
+  font-weight:540;
+}
+.fleetPatternGrid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:10px;
+}
+.fleetPatternGrid.lower { grid-template-columns:1.12fr .88fr; }
+.fleetPatternCard {
+  min-width:0;
+  padding:16px;
+  border:1px solid #20252b;
+  border-radius:7px;
+  background:#0a0d10;
+}
+.fleetPatternCardTitle {
+  display:flex;
+  align-items:flex-start;
+  gap:9px;
+  min-height:36px;
+}
+.fleetPatternCardTitle > svg { color:#77818c; flex:0 0 auto; }
+.fleetPatternCardTitle > div { min-width:0; flex:1; }
+.fleetPatternCardTitle span,
+.fleetPatternCardTitle b { display:block; }
+.fleetPatternCardTitle span {
+  color:#59636e;
+  font-size:8px;
+  letter-spacing:.11em;
+}
+.fleetPatternCardTitle b {
+  margin-top:3px;
+  color:#c7cdd4;
+  font-size:11px;
+  font-weight:540;
+}
+.fleetPatternDimensionTabs {
+  display:flex;
+  flex-wrap:wrap;
+  gap:5px;
+  margin:12px 0 8px;
+}
+.fleetPatternDimensionTabs button {
+  padding:6px 8px;
+  color:#6e7883;
+  background:#0e1114;
+  border:1px solid #252b32;
+  border-radius:999px;
+  font-size:8px;
+  cursor:pointer;
+}
+.fleetPatternDimensionTabs button.active {
+  color:#d5dae0;
+  border-color:#4a535e;
+  background:#171b20;
+}
+.fleetPatternRow,
+.fleetClusterRows button,
+.fleetSimilarityRows button {
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:10px;
+  align-items:center;
+  width:100%;
+  padding:10px 0;
+  border:0;
+  border-top:1px solid #1b2025;
+  color:#aab2bc;
+  background:transparent;
+  text-align:left;
+}
+.fleetClusterRows button,
+.fleetSimilarityRows button { cursor:pointer; }
+.fleetPatternRow b,
+.fleetPatternRow span,
+.fleetClusterRows b,
+.fleetClusterRows span,
+.fleetClusterRows small,
+.fleetSimilarityRows b,
+.fleetSimilarityRows span,
+.fleetSimilarityRows small {
+  display:block;
+}
+.fleetPatternRow b,
+.fleetClusterRows b,
+.fleetSimilarityRows b {
+  color:#c4cad1;
+  font-size:10px;
+  font-weight:530;
+}
+.fleetPatternRow span,
+.fleetClusterRows span,
+.fleetSimilarityRows span {
+  margin-top:2px;
+  color:#68727d;
+  font-size:8px;
+}
+.fleetClusterRows small,
+.fleetSimilarityRows small {
+  margin-top:3px;
+  color:#505964;
+  font-size:8px;
+}
+.fleetPatternRow > div:last-child,
+.fleetClusterRows button > div:last-child,
+.fleetSimilarityRows button > div:last-child {
+  text-align:right;
+}
+.fleetPatternRow strong,
+.fleetClusterRows strong,
+.fleetSimilarityRows strong {
+  display:block;
+  color:#d5dae0;
+  font-size:14px;
+  font-weight:540;
+}
+.fleetWatchButton {
+  display:flex;
+  align-items:center;
+  gap:5px;
+  padding:6px 8px;
+  color:#8a949f;
+  border:1px solid #30363e;
+  border-radius:999px;
+  background:#101317;
+  font-size:8px;
+  cursor:pointer;
+}
+.fleetWatchButton.watched {
+  color:#d4bd7b;
+  border-color:#615536;
+}
+.fleetPatternEmpty {
+  padding:28px 8px;
+  color:#59636e;
+  font-size:9px;
+  text-align:center;
+}
+.fleetSavedViewComposer {
+  display:grid;
+  grid-template-columns:1fr .9fr auto;
+  gap:6px;
+  margin:12px 0 10px;
+}
+.fleetSavedViewComposer input,
+.fleetSavedViewComposer select {
+  min-width:0;
+  height:34px;
+  padding:0 8px;
+  color:#b8c0c9;
+  background:#0c0f12;
+  border:1px solid #293038;
+  border-radius:5px;
+  font-size:9px;
+}
+.fleetSavedViewComposer button {
+  display:flex;
+  align-items:center;
+  gap:5px;
+  padding:0 10px;
+  color:#c0c7cf;
+  background:#15191e;
+  border:1px solid #313840;
+  border-radius:5px;
+  cursor:pointer;
+  font-size:8px;
+}
+.fleetSavedViews > div {
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:8px;
+  align-items:center;
+  padding:9px 0;
+  border-top:1px solid #1b2025;
+}
+.fleetSavedViews b,
+.fleetSavedViews span { display:block; }
+.fleetSavedViews b { font-size:9px; color:#b9c0c8; }
+.fleetSavedViews span {
+  margin-top:2px;
+  color:#56606a;
+  font-size:8px;
+  font-family:"SFMono-Regular",Consolas,monospace;
+}
+.fleetSavedViews button {
+  display:grid;
+  place-items:center;
+  width:28px;
+  height:28px;
+  color:#69737e;
+  background:transparent;
+  border:1px solid #262c33;
+  border-radius:5px;
+  cursor:pointer;
+}
+.fleetPatternSubhead {
+  display:block;
+  margin:14px 0 5px;
+  color:#59636e;
+  font-size:8px;
+  letter-spacing:.1em;
+}
+.fleetWatchlist button {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  padding:8px 0;
+  color:#8b949e;
+  background:transparent;
+  border:0;
+  border-top:1px solid #1b2025;
+  text-align:left;
+  cursor:pointer;
+}
+.fleetWatchlist button > svg { color:#a88d4f; }
+.fleetWatchlist b,
+.fleetWatchlist span { display:block; }
+.fleetWatchlist b { font-size:9px; color:#bbc2ca; }
+.fleetWatchlist span { margin-top:2px; font-size:8px; color:#58626d; }
+
+@media(max-width:1100px) {
+  .fleetPatternGrid,
+  .fleetPatternGrid.lower { grid-template-columns:1fr; }
+}
+@media(max-width:720px) {
+  .fleetPatternMetrics { grid-template-columns:repeat(2,1fr); }
+  .fleetSavedViewComposer { grid-template-columns:1fr; }
+}

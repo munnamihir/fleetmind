@@ -15,6 +15,7 @@ import { DiagnosticTransitionIntelligence } from './DiagnosticTransitionIntellig
 import { DiagnosticEventFeed } from './DiagnosticEventFeed';
 import { DiagnosticEpisodeIntelligence } from './DiagnosticEpisodeIntelligence';
 import { DiagnosticCaseIntelligence } from './DiagnosticCaseIntelligence';
+import { FleetPatternIntelligence } from './FleetPatternIntelligence';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
@@ -566,6 +567,12 @@ export function RootCauseDashboard() {
       </section>
 
       <DiagnosticCaseIntelligence
+        selectedVehicleId={selectedVehicleId}
+        onSelectVehicle={setSelectedVehicleId}
+        runId={status?.runId}
+      />
+
+      <FleetPatternIntelligence
         selectedVehicleId={selectedVehicleId}
         onSelectVehicle={setSelectedVehicleId}
         runId={status?.runId}
