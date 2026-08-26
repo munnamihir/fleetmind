@@ -17,6 +17,7 @@ import { DiagnosticEpisodeIntelligence } from './DiagnosticEpisodeIntelligence';
 import { DiagnosticCaseIntelligence } from './DiagnosticCaseIntelligence';
 import { FleetPatternIntelligence } from './FleetPatternIntelligence';
 import { PrognosticMaintenanceIntelligence } from './PrognosticMaintenanceIntelligence';
+import { OperationalAutomationIntelligence } from './OperationalAutomationIntelligence';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
@@ -580,6 +581,12 @@ export function RootCauseDashboard() {
       />
 
       <PrognosticMaintenanceIntelligence
+        selectedVehicleId={selectedVehicleId}
+        onSelectVehicle={setSelectedVehicleId}
+        runId={status?.runId}
+      />
+
+      <OperationalAutomationIntelligence
         selectedVehicleId={selectedVehicleId}
         onSelectVehicle={setSelectedVehicleId}
         runId={status?.runId}
