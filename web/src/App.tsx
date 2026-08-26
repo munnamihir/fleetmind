@@ -20,7 +20,7 @@ import { RootCauseDashboard } from './RootCauseDashboard';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
-type Page = 'fleet' | 'reliability' | 'firmware' | 'ml' | 'diagnostics';
+type Page = 'fleet' | 'incidents' | 'reliability' | 'cohorts' | 'components' | 'firmware' | 'ml' | 'diagnostics';
 
 type Summary = {
   vehiclesMonitored: number;
@@ -455,12 +455,18 @@ export function App() {
           <button className={page === 'fleet' ? 'navActive' : ''} onClick={() => setPage('fleet')}>
             <Gauge size={17} /> Fleet Overview
           </button>
-          <button><AlertTriangle size={17} /> Incidents</button>
+          <button className={page === 'incidents' ? 'navActive' : ''} onClick={() => setPage('incidents')}>
+            <AlertTriangle size={17} /> Incidents
+          </button>
           <button className={page === 'reliability' ? 'navActive' : ''} onClick={() => setPage('reliability')}>
             <Activity size={17} /> Reliability
           </button>
-          <button><Binary size={17} /> Cohorts</button>
-          <button><Cpu size={17} /> Components</button>
+          <button className={page === 'cohorts' ? 'navActive' : ''} onClick={() => setPage('cohorts')}>
+            <Binary size={17} /> Cohorts
+          </button>
+          <button className={page === 'components' ? 'navActive' : ''} onClick={() => setPage('components')}>
+            <Cpu size={17} /> Components
+          </button>
           <button className={page === 'firmware' ? 'navActive' : ''} onClick={() => setPage('firmware')}><Zap size={17} /> Firmware</button>
           <button className={page === 'ml' ? 'navActive' : ''} onClick={() => setPage('ml')}><BrainCircuit size={17} /> Predictive ML</button>
           <button className={page === 'diagnostics' ? 'navActive' : ''} onClick={() => setPage('diagnostics')}><Wrench size={17} /> Root Cause</button>
@@ -480,11 +486,27 @@ export function App() {
             alerts={alerts}
             cohorts={cohorts}
           />
+        ) : page === 'incidents' ? (
+          <IncidentsDashboard
+            summary={summary}
+            alerts={alerts}
+            failures={failures}
+          />
         ) : page === 'reliability' ? (
           <ReliabilityDashboard
             reliability={reliability}
             failures={failures}
             observedFailures={summary.observedFailures}
+          />
+        ) : page === 'cohorts' ? (
+          <CohortsDashboard
+            cohorts={cohorts}
+            reliability={reliability}
+          />
+        ) : page === 'components' ? (
+          <ComponentsDashboard
+            cohorts={cohorts}
+            reliability={reliability}
           />
         ) : page === 'firmware' ? (
           <FirmwareDashboard
@@ -508,30 +530,190 @@ function Header({ connected, page }: { connected: boolean; page: Page }) {
         <p className="eyebrow">
           {page === 'fleet'
             ? 'GLOBAL FLEET INTELLIGENCE'
-            : page === 'reliability'
-              ? 'RELIABILITY SCIENCE / COOLANT PUMP'
-              : page === 'firmware'
-                ? 'FIRMWARE REGRESSION LAB / MATCHED COHORTS'
-                : page === 'ml'
-                  ? 'PREDICTIVE MAINTENANCE ML / FORWARD FAILURE HORIZON'
-                  : 'ROOT CAUSE INTELLIGENCE / COMPETING HYPOTHESES'}
+            : page === 'incidents'
+              ? 'INCIDENT OPERATIONS / OBSERVED ALERT STREAM'
+              : page === 'reliability'
+                ? 'RELIABILITY SCIENCE / COOLANT PUMP'
+                : page === 'cohorts'
+                  ? 'COHORT INTELLIGENCE / COMPONENT REVISIONS'
+                  : page === 'components'
+                    ? 'COMPONENT INTELLIGENCE / COOLANT SYSTEM'
+                    : page === 'firmware'
+                      ? 'FIRMWARE REGRESSION LAB / MATCHED COHORTS'
+                      : page === 'ml'
+                        ? 'PREDICTIVE MAINTENANCE ML / FORWARD FAILURE HORIZON'
+                        : 'ROOT CAUSE INTELLIGENCE / COMPETING HYPOTHESES'}
         </p>
         <h1>
           {page === 'fleet'
             ? 'Machine health, before the fault code.'
-            : page === 'reliability'
-              ? 'Field reliability, quantified from observed life.'
-              : page === 'firmware'
-                ? 'Did the software change the failure rate?'
-                : page === 'ml'
-                  ? 'Predict the failure before the fault code exists.'
-                  : 'Rank the root cause, then inspect the evidence.'}
+            : page === 'incidents'
+              ? 'See what needs attention, without hiding the evidence.'
+              : page === 'reliability'
+                ? 'Field reliability, quantified from observed life.'
+                : page === 'cohorts'
+                  ? 'Compare revision populations before drawing conclusions.'
+                  : page === 'components'
+                    ? 'Track component health from observed fleet evidence.'
+                    : page === 'firmware'
+                      ? 'Did the software change the failure rate?'
+                      : page === 'ml'
+                        ? 'Predict the failure before the fault code exists.'
+                        : 'Rank the root cause, then inspect the evidence.'}
         </h1>
       </div>
       <div className={`live ${connected ? 'on' : ''}`}>
         <span /> {connected ? 'LIVE' : 'OFFLINE'}
       </div>
     </header>
+  );
+}
+
+
+function IncidentsDashboard({
+  summary,
+  alerts,
+  failures,
+}: {
+  summary: Summary;
+  alerts: Alert[];
+  failures: FailureRow[];
+}) {
+  const highestRisk = alerts.reduce(
+    (value, alert) => Math.max(value, alert.riskScore),
+    0,
+  );
+
+  return (
+    <>
+      <section className="metrics">
+        <Metric icon={<AlertTriangle />} label="Active alerts" value={formatNumber(summary.activeAlerts)} detail={`${summary.criticalAlerts} critical`} />
+        <Metric icon={<ShieldCheck />} label="Observed failures" value={formatNumber(summary.observedFailures)} detail="recorded fleet outcomes" />
+        <Metric icon={<Gauge />} label="Highest alert risk" value={alerts.length ? formatPct(highestRisk) : '—'} detail="current alert feed" />
+        <Metric icon={<Radio />} label="Visible incidents" value={formatNumber(alerts.length)} detail="latest operational detections" />
+      </section>
+
+      <section className="grid lower">
+        <article className="panel alertsPanel">
+          <PanelTitle kicker="INCIDENT STREAM" title="Latest anomaly detections" />
+          <div className="alertList">
+            {alerts.length === 0 && <div className="empty">No active anomaly detections are visible yet.</div>}
+            {alerts.map(alert => (
+              <div className="alertRow" key={alert.id}>
+                <div className={`severity ${alert.severity}`} />
+                <div className="alertMain">
+                  <div><b>{alert.vehicleId}</b><span>{alert.title}</span></div>
+                  <small>{alert.factory} · {alert.firmware} · {alert.pumpRevision}</small>
+                </div>
+                <div className="risk">{Math.round(alert.riskScore * 100)}<span>%</span><small>risk</small></div>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="panel alertsPanel">
+          <PanelTitle kicker="OBSERVED OUTCOMES" title="Recent recorded component failures" />
+          <div className="alertList">
+            {failures.length === 0 && <div className="empty">No observed failure rows are available yet.</div>}
+            {failures.map(failure => (
+              <div className="alertRow" key={`${failure.vehicleId}-${failure.occurredAt}`}>
+                <div className="severity critical" />
+                <div className="alertMain">
+                  <div><b>{failure.vehicleId}</b><span>{humanize(failure.component)} · {humanize(failure.failureMode)}</span></div>
+                  <small>{formatMiles(failure.failureMileage)} · {failure.firmware} · {failure.pumpRevision}</small>
+                </div>
+                <div className="risk">{failure.warning.detectedBeforeFailure ? 'YES' : 'NO'}<small>early warning</small></div>
+              </div>
+            ))}
+          </div>
+          <p className="muted">This view keeps operational anomaly scores separate from recorded outcomes; an alert score is not a hidden failure marker.</p>
+        </article>
+      </section>
+    </>
+  );
+}
+
+function CohortsDashboard({
+  cohorts,
+  reliability,
+}: {
+  cohorts: Cohort[];
+  reliability: ReliabilityCohort[];
+}) {
+  const totalPopulation = reliability.reduce((sum, cohort) => sum + cohort.population, 0);
+  const totalFailures = reliability.reduce((sum, cohort) => sum + cohort.failures, 0);
+  const highestRisk = cohorts.reduce((value, cohort) => Math.max(value, cohort.averageRisk), 0);
+  const reliabilityByRevision = new Map(reliability.map(cohort => [cohort.pumpRevision, cohort]));
+
+  return (
+    <>
+      <section className="metrics">
+        <Metric icon={<Binary />} label="Revision cohorts" value={formatNumber(cohorts.length)} detail="pump revision groups" />
+        <Metric icon={<Radio />} label="Observed population" value={formatNumber(totalPopulation)} detail="reliability cohort vehicles" />
+        <Metric icon={<AlertTriangle />} label="Observed failures" value={formatNumber(totalFailures)} detail="across revision cohorts" />
+        <Metric icon={<Gauge />} label="Highest average risk" value={cohorts.length ? formatPct(highestRisk) : '—'} detail="telemetry-derived cohort context" />
+      </section>
+
+      <section className="panel cohortPanel">
+        <PanelTitle kicker="COHORT COMPARISON" title="Pump revision evidence" />
+        <div className="cohortHead"><span>Revision</span><span>Samples</span><span>Avg current</span><span>Risk</span></div>
+        {[...cohorts].sort((a, b) => b.averageRisk - a.averageRisk).map(cohort => {
+          const observed = reliabilityByRevision.get(cohort.pumpRevision);
+          return (
+            <div className="cohortRow" key={cohort.pumpRevision}>
+              <b>{cohort.pumpRevision}</b>
+              <span>{formatNumber(cohort.samples)}{observed ? ` · ${observed.failures} failures` : ''}</span>
+              <span>{cohort.averagePumpCurrentA.toFixed(2)} A</span>
+              <strong className={cohort.averageRisk > 0.25 ? 'hot' : ''}>{formatPct(cohort.averageRisk)}</strong>
+            </div>
+          );
+        })}
+        {cohorts.length === 0 && <div className="empty">Cohort evidence will appear after telemetry is available.</div>}
+        <p className="muted">Cohort differences are descriptive fleet evidence. They do not by themselves establish component causality.</p>
+      </section>
+    </>
+  );
+}
+
+function ComponentsDashboard({
+  cohorts,
+  reliability,
+}: {
+  cohorts: Cohort[];
+  reliability: ReliabilityCohort[];
+}) {
+  const reliabilityByRevision = new Map(reliability.map(cohort => [cohort.pumpRevision, cohort]));
+  const totalPopulation = reliability.reduce((sum, cohort) => sum + cohort.population, 0);
+  const totalFailures = reliability.reduce((sum, cohort) => sum + cohort.failures, 0);
+  const overallFailureRate = totalPopulation > 0 ? totalFailures / totalPopulation : null;
+
+  return (
+    <>
+      <section className="metrics">
+        <Metric icon={<Cpu />} label="Component focus" value="COOLANT PUMP" detail="current reliability subsystem" />
+        <Metric icon={<Binary />} label="Tracked revisions" value={formatNumber(cohorts.length)} detail="hardware cohorts" />
+        <Metric icon={<Radio />} label="Observed population" value={formatNumber(totalPopulation)} detail="reliability evidence" />
+        <Metric icon={<AlertTriangle />} label="Observed failure rate" value={formatPct(overallFailureRate)} detail={`${totalFailures} recorded failures`} />
+      </section>
+
+      <section className="panel cohortPanel">
+        <PanelTitle kicker="COMPONENT HEALTH" title="Coolant-pump revision profile" />
+        <div className="cohortHead"><span>Revision</span><span>Population</span><span>Avg current</span><span>Failure rate</span></div>
+        {[...cohorts].sort((a, b) => b.averageRisk - a.averageRisk).map(cohort => {
+          const observed = reliabilityByRevision.get(cohort.pumpRevision);
+          return (
+            <div className="cohortRow" key={cohort.pumpRevision}>
+              <b>{cohort.pumpRevision}</b>
+              <span>{formatNumber(observed?.population ?? cohort.samples)}</span>
+              <span>{cohort.averagePumpCurrentA.toFixed(2)} A</span>
+              <strong className={observed != null && observed.failureRate > 0.1 ? 'hot' : ''}>{observed ? formatPct(observed.failureRate) : '—'}</strong>
+            </div>
+          );
+        })}
+        {cohorts.length === 0 && <div className="empty">Component evidence will appear after telemetry is available.</div>}
+        <p className="muted">This tab summarizes the component evidence FleetMind currently models. It does not expose private failure markers or claim that a telemetry signal proves physical causation.</p>
+      </section>
+    </>
   );
 }
 
