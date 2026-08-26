@@ -94,6 +94,32 @@ from fleetmind_common.vehicle_twin_rules import (
     layer_presence_payload,
     twin_list_record,
 )
+from fleetmind_common.fleet_twin_rules import (
+    FLEET_TWIN_DIMENSIONS,
+    FLEET_TWIN_EXPOSURE_MEASURES,
+    FLEET_TWIN_RULES_VERSION,
+    cohort_exposure_rows,
+    compare_cohort_exposure,
+    exposure_measure_rate,
+    fleet_cohort_exposure,
+    fleet_exposure_summary,
+)
+from fleetmind_common.fleet_change_rules import (
+    FLEET_CHANGE_RULES_VERSION,
+    FLEET_CHANGE_TRANSITIONS,
+    compare_fleet_states,
+)
+from fleetmind_common.capacity_planning_rules import (
+    CAPACITY_PLANNING_RULES_VERSION,
+    CAPACITY_PLANNING_STRATEGIES,
+    simulate_capacity_plan,
+)
+from fleetmind_common.workflow_effectiveness_rules import (
+    WORKFLOW_EFFECTIVENESS_RULES_VERSION,
+    policy_action_effectiveness_rows,
+    summarize_policy_effectiveness,
+    summarize_workflow_effectiveness,
+)
 from fleetmind_common.fleet_decision_rules import (
     COHORT_DIMENSIONS,
     COVERAGE_GAPS,
@@ -5614,6 +5640,1286 @@ def vehicle_twin_snapshots(vehicle_id:str,
     rows=db.execute(select(DiagnosticVehicleTwinSnapshot).where(DiagnosticVehicleTwinSnapshot.run_id==run.id,DiagnosticVehicleTwinSnapshot.experiment_id==experiment_id,DiagnosticVehicleTwinSnapshot.vehicle_id==vehicle_id).order_by(desc(DiagnosticVehicleTwinSnapshot.created_at),desc(DiagnosticVehicleTwinSnapshot.id)).limit(limit)).scalars().all()
     return {"runId":run.id,"experimentId":experiment_id,"vehicleId":vehicle_id,"rulesVersion":VEHICLE_TWIN_RULES_VERSION,
             "total":total,"returned":len(rows),"snapshots":[_vehicle_twin_snapshot_payload(r) for r in rows],"scopePolicy":_vehicle_twin_scope_policy()}
+
+
+# Phase 7.2 — Fleet Twin + Normalized Cohort Exposure
+#
+# Fleet Twin exposure is a selected-run operational population view.
+# Counts describe operational volume; normalized rates use cohort population
+# denominators. Rate ratios are descriptive representation only — not physical
+# failure risk, reliability probability, causal inference, RUL, or attribution.
+
+
+def _fleet_twin_scope_policy() -> dict:
+    return {
+        "selectedRunOnly": True,
+        "defaultRunSelection": "latest_persisted_trained_run",
+        "activeTelemetryExperimentRequired": False,
+        "exactExperimentOnly": True,
+        "scoringContextBoundedToPredictionAnchor": True,
+        "postRunTelemetryUsed": False,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "physicalRiskScore": False,
+        "physicalFailureProbability": False,
+        "relativeFailureRisk": False,
+        "physicalRul": False,
+        "causalInference": False,
+        "modelFeatureAttribution": False,
+        "technicianHours": False,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+    }
+
+
+def _fleet_twin_scoring_context_by_vehicle(
+    db: Session,
+    *,
+    experiment_id: str,
+    run: DiagnosticModelRun,
+) -> dict[str, dict]:
+    """
+    Resolve frozen cohort metadata for the selected run in one SQL query.
+
+    Each vehicle uses the latest observable telemetry row whose timestamp is
+    less than or equal to that vehicle's persisted prediction anchor. This is
+    the same scoring-context boundary used by the Phase 7.1 vehicle twin.
+
+    The window function prevents a 500-vehicle N+1 query pattern.
+    """
+
+    ranked = (
+        select(
+            DiagnosticPrediction.vehicle_id.label("vehicle_id"),
+            Telemetry.model.label("model"),
+            Telemetry.factory.label("factory"),
+            Telemetry.firmware.label("firmware"),
+            Telemetry.pump_revision.label("pump_revision"),
+            Telemetry.mileage.label("mileage"),
+            Telemetry.timestamp.label("timestamp"),
+            func.row_number()
+            .over(
+                partition_by=DiagnosticPrediction.vehicle_id,
+                order_by=(
+                    desc(Telemetry.timestamp),
+                    desc(Telemetry.id),
+                ),
+            )
+            .label("row_number"),
+        )
+        .join(
+            Telemetry,
+            (
+                (Telemetry.experiment_id == DiagnosticPrediction.experiment_id)
+                & (Telemetry.vehicle_id == DiagnosticPrediction.vehicle_id)
+                & (Telemetry.timestamp <= DiagnosticPrediction.anchor_timestamp)
+            ),
+        )
+        .where(
+            DiagnosticPrediction.run_id == run.id,
+            DiagnosticPrediction.experiment_id == experiment_id,
+        )
+        .subquery()
+    )
+
+    rows = db.execute(
+        select(
+            ranked.c.vehicle_id,
+            ranked.c.model,
+            ranked.c.factory,
+            ranked.c.firmware,
+            ranked.c.pump_revision,
+            ranked.c.mileage,
+            ranked.c.timestamp,
+        )
+        .where(ranked.c.row_number == 1)
+        .order_by(ranked.c.vehicle_id)
+    ).all()
+
+    return {
+        str(row.vehicle_id): {
+            "model": row.model,
+            "factory": row.factory,
+            "firmware": row.firmware,
+            "pumpRevision": row.pump_revision,
+            "scoringContextMileage": (
+                round(float(row.mileage), 1)
+                if row.mileage is not None
+                else None
+            ),
+            "scoringContextTimestamp": (
+                row.timestamp.isoformat()
+                if row.timestamp is not None
+                else None
+            ),
+        }
+        for row in rows
+    }
+
+
+def _current_fleet_twin_records(
+    db: Session,
+    *,
+    run_id: int | None = None,
+) -> tuple[str, DiagnosticModelRun, list[dict]]:
+    experiment_id, run = _resolve_vehicle_twin_run(db, run_id)
+
+    _, decision_run, decision_records = _current_fleet_decision_records(
+        db,
+        selected_run=run,
+    )
+
+    if decision_run.id != run.id:
+        raise HTTPException(
+            status_code=409,
+            detail="Fleet decision records are not aligned to selected twin run",
+        )
+
+    contexts = _fleet_twin_scoring_context_by_vehicle(
+        db,
+        experiment_id=experiment_id,
+        run=run,
+    )
+
+    records: list[dict] = []
+
+    for decision in decision_records:
+        vehicle_id = str(decision["vehicleId"])
+        context = contexts.get(vehicle_id, {})
+
+        records.append(
+            {
+                **decision,
+                "model": context.get("model"),
+                "factory": context.get("factory"),
+                "firmware": context.get("firmware"),
+                "pumpRevision": context.get("pumpRevision"),
+                "scoringContextMileage": context.get(
+                    "scoringContextMileage"
+                ),
+                "scoringContextTimestamp": context.get(
+                    "scoringContextTimestamp"
+                ),
+                "automationStatus": current_automation_status(
+                    list(decision.get("automationStatuses") or [])
+                ),
+            }
+        )
+
+    records.sort(key=lambda row: str(row["vehicleId"]))
+
+    return experiment_id, run, records
+
+
+@router.get("/fleet-twin/summary")
+def fleet_twin_summary(
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_fleet_twin_records(
+        db,
+        run_id=run_id,
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": FLEET_TWIN_RULES_VERSION,
+        **fleet_exposure_summary(records),
+        "dimensions": list(FLEET_TWIN_DIMENSIONS),
+        "exposureMeasures": list(FLEET_TWIN_EXPOSURE_MEASURES),
+        "scopePolicy": _fleet_twin_scope_policy(),
+        "interpretationPolicy": (
+            "Fleet Twin counts describe selected-run operational volume. "
+            "Rates normalize by cohort population. Workload units are synthetic "
+            "workflow prioritization units, not technician hours. Exposure "
+            "rates and ratios are not physical failure probabilities, relative "
+            "failure risk, reliability estimates, causal effects, RUL, or "
+            "model attribution."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/fleet-twin/cohorts")
+def fleet_twin_cohorts(
+    dimension: str = Query(default="factory"),
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    if dimension not in FLEET_TWIN_DIMENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported Fleet Twin cohort dimension",
+                "allowed": list(FLEET_TWIN_DIMENSIONS),
+            },
+        )
+
+    experiment_id, run, records = _current_fleet_twin_records(
+        db,
+        run_id=run_id,
+    )
+
+    payload = fleet_cohort_exposure(records, dimension)
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        **payload,
+        "scopePolicy": _fleet_twin_scope_policy(),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/fleet-twin/exposure")
+def fleet_twin_exposure(
+    dimension: str = Query(default="factory"),
+    measure: str = Query(default="nonHealthy"),
+    limit: int = Query(default=50, ge=1, le=500),
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    if dimension not in FLEET_TWIN_DIMENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported Fleet Twin cohort dimension",
+                "allowed": list(FLEET_TWIN_DIMENSIONS),
+            },
+        )
+
+    if measure not in FLEET_TWIN_EXPOSURE_MEASURES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported Fleet Twin exposure measure",
+                "allowed": list(FLEET_TWIN_EXPOSURE_MEASURES),
+            },
+        )
+
+    experiment_id, run, records = _current_fleet_twin_records(
+        db,
+        run_id=run_id,
+    )
+
+    rows = cohort_exposure_rows(records, dimension)
+
+    rows.sort(
+        key=lambda row: (
+            exposure_measure_rate(row, measure),
+            int(row.get("populationCount") or 0),
+            str(row.get("value") or ""),
+        ),
+        reverse=True,
+    )
+
+    selected = rows[:limit]
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": FLEET_TWIN_RULES_VERSION,
+        "dimension": dimension,
+        "measure": measure,
+        "fleetBaseline": fleet_exposure_summary(records),
+        "totalCohorts": len(rows),
+        "returnedCohorts": len(selected),
+        "cohorts": selected,
+        "scopePolicy": _fleet_twin_scope_policy(),
+        "interpretationPolicy": (
+            "Ranking uses normalized operational cohort rate, not raw count. "
+            "Higher representation does not establish greater physical failure "
+            "risk, reliability risk, causality, or component condition."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/fleet-twin/exposure/compare")
+def fleet_twin_exposure_compare(
+    dimension: str = Query(),
+    reference_value: str = Query(min_length=1),
+    candidate_value: str = Query(min_length=1),
+    measure: str = Query(default="nonHealthy"),
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    if dimension not in FLEET_TWIN_DIMENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported Fleet Twin cohort dimension",
+                "allowed": list(FLEET_TWIN_DIMENSIONS),
+            },
+        )
+
+    if measure not in FLEET_TWIN_EXPOSURE_MEASURES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported Fleet Twin exposure measure",
+                "allowed": list(FLEET_TWIN_EXPOSURE_MEASURES),
+            },
+        )
+
+    experiment_id, run, records = _current_fleet_twin_records(
+        db,
+        run_id=run_id,
+    )
+
+    rows = cohort_exposure_rows(records, dimension)
+    by_value = {
+        str(row["value"]): row
+        for row in rows
+    }
+
+    if reference_value not in by_value:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Reference cohort {reference_value!r} was not found "
+                f"for dimension {dimension!r}"
+            ),
+        )
+
+    if candidate_value not in by_value:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Candidate cohort {candidate_value!r} was not found "
+                f"for dimension {dimension!r}"
+            ),
+        )
+
+    comparison = compare_cohort_exposure(
+        by_value[reference_value],
+        by_value[candidate_value],
+        measure=measure,
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": FLEET_TWIN_RULES_VERSION,
+        "comparison": comparison,
+        "scopePolicy": _fleet_twin_scope_policy(),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+
+# Phase 7.3 — Fleet State Change Intelligence
+#
+# Snapshot and selected-current comparisons describe operational workflow and
+# evidence-state changes. They do not establish physical deterioration,
+# physical improvement, causal maintenance effect, or reliability change.
+
+
+def _fleet_change_scope_policy() -> dict:
+    return {
+        "selectedRunOnly": True,
+        "defaultRunSelection": "latest_persisted_trained_run",
+        "activeTelemetryExperimentRequired": False,
+        "exactExperimentOnly": True,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "physicalConditionChange": False,
+        "physicalRiskChange": False,
+        "causalMaintenanceEffect": False,
+        "reliabilityChangeProof": False,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+        "comparisonWrites": False,
+    }
+
+
+def _selected_fleet_snapshot(
+    db: Session,
+    *,
+    run: DiagnosticModelRun,
+    experiment_id: str,
+    snapshot_id: int,
+) -> DiagnosticFleetDecisionSnapshot:
+    row = db.execute(
+        select(DiagnosticFleetDecisionSnapshot)
+        .where(
+            DiagnosticFleetDecisionSnapshot.id == snapshot_id,
+            DiagnosticFleetDecisionSnapshot.run_id == run.id,
+            DiagnosticFleetDecisionSnapshot.experiment_id
+            == experiment_id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Fleet snapshot {snapshot_id} was not found in "
+                f"selected diagnostic run {run.id}"
+            ),
+        )
+
+    return row
+
+
+def _fleet_change_inputs(
+    db: Session,
+    *,
+    snapshot_from: int,
+    snapshot_to: int | None,
+    to_current: bool,
+    run_id: int | None,
+) -> tuple[
+    str,
+    DiagnosticModelRun,
+    DiagnosticFleetDecisionSnapshot,
+    DiagnosticFleetDecisionSnapshot | None,
+    list[dict],
+    list[dict],
+]:
+    if snapshot_to is not None and to_current:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Choose either snapshot_to or to_current=true, not both"
+            ),
+        )
+
+    if snapshot_to is None and not to_current:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Provide snapshot_to or set to_current=true"
+            ),
+        )
+
+    experiment_id, run = _resolve_vehicle_twin_run(
+        db,
+        run_id,
+    )
+
+    from_snapshot = _selected_fleet_snapshot(
+        db,
+        run=run,
+        experiment_id=experiment_id,
+        snapshot_id=snapshot_from,
+    )
+
+    before_records = _json_list(
+        from_snapshot.records_json
+    )
+
+    to_snapshot = None
+
+    if snapshot_to is not None:
+        to_snapshot = _selected_fleet_snapshot(
+            db,
+            run=run,
+            experiment_id=experiment_id,
+            snapshot_id=snapshot_to,
+        )
+
+        after_records = _json_list(
+            to_snapshot.records_json
+        )
+    else:
+        (
+            current_experiment_id,
+            current_run,
+            after_records,
+        ) = _current_fleet_decision_records(
+            db,
+            selected_run=run,
+        )
+
+        if (
+            current_run.id != run.id
+            or current_experiment_id != experiment_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Selected current fleet state is not aligned "
+                    "to the requested run"
+                ),
+            )
+
+    return (
+        experiment_id,
+        run,
+        from_snapshot,
+        to_snapshot,
+        before_records,
+        after_records,
+    )
+
+
+@router.get("/fleet-change/snapshots")
+def fleet_change_snapshots(
+    limit: int = Query(default=50, ge=1, le=100),
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _resolve_vehicle_twin_run(
+        db,
+        run_id,
+    )
+
+    total = int(
+        db.scalar(
+            select(
+                func.count(
+                    DiagnosticFleetDecisionSnapshot.id
+                )
+            ).where(
+                DiagnosticFleetDecisionSnapshot.run_id == run.id,
+                DiagnosticFleetDecisionSnapshot.experiment_id
+                == experiment_id,
+            )
+        )
+        or 0
+    )
+
+    rows = db.execute(
+        select(DiagnosticFleetDecisionSnapshot)
+        .where(
+            DiagnosticFleetDecisionSnapshot.run_id == run.id,
+            DiagnosticFleetDecisionSnapshot.experiment_id
+            == experiment_id,
+        )
+        .order_by(
+            desc(DiagnosticFleetDecisionSnapshot.created_at),
+            desc(DiagnosticFleetDecisionSnapshot.id),
+        )
+        .limit(limit)
+    ).scalars().all()
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": FLEET_CHANGE_RULES_VERSION,
+        "total": total,
+        "returned": len(rows),
+        "snapshots": [
+            _fleet_decision_snapshot_payload(row)
+            for row in rows
+        ],
+        "scopePolicy": _fleet_change_scope_policy(),
+    }
+
+
+@router.get("/fleet-change/compare")
+def fleet_change_compare(
+    snapshot_from: int = Query(ge=1),
+    snapshot_to: int | None = Query(default=None, ge=1),
+    to_current: bool = Query(default=False),
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    (
+        experiment_id,
+        run,
+        from_snapshot,
+        to_snapshot,
+        before_records,
+        after_records,
+    ) = _fleet_change_inputs(
+        db,
+        snapshot_from=snapshot_from,
+        snapshot_to=snapshot_to,
+        to_current=to_current,
+        run_id=run_id,
+    )
+
+    comparison = compare_fleet_states(
+        before_records,
+        after_records,
+    )
+
+    vehicle_changes = comparison.pop(
+        "vehicleChanges"
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": FLEET_CHANGE_RULES_VERSION,
+        "fromSnapshot": _fleet_decision_snapshot_payload(
+            from_snapshot
+        ),
+        "toSnapshot": (
+            _fleet_decision_snapshot_payload(to_snapshot)
+            if to_snapshot is not None
+            else None
+        ),
+        "toCurrent": to_snapshot is None,
+        **comparison,
+        "changedVehicleCount": sum(
+            1
+            for row in vehicle_changes
+            if row["changed"]
+        ),
+        "scopePolicy": _fleet_change_scope_policy(),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/fleet-change/vehicles")
+def fleet_change_vehicles(
+    snapshot_from: int = Query(ge=1),
+    snapshot_to: int | None = Query(default=None, ge=1),
+    to_current: bool = Query(default=False),
+    transition: str | None = Query(default=None),
+    changed_only: bool = Query(default=True),
+    limit: int = Query(default=100, ge=1, le=500),
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    if (
+        transition is not None
+        and transition not in FLEET_CHANGE_TRANSITIONS
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported fleet transition",
+                "allowed": list(FLEET_CHANGE_TRANSITIONS),
+            },
+        )
+
+    (
+        experiment_id,
+        run,
+        from_snapshot,
+        to_snapshot,
+        before_records,
+        after_records,
+    ) = _fleet_change_inputs(
+        db,
+        snapshot_from=snapshot_from,
+        snapshot_to=snapshot_to,
+        to_current=to_current,
+        run_id=run_id,
+    )
+
+    comparison = compare_fleet_states(
+        before_records,
+        after_records,
+    )
+
+    rows = comparison["vehicleChanges"]
+
+    if changed_only:
+        rows = [
+            row
+            for row in rows
+            if row["changed"]
+        ]
+
+    if transition is not None:
+        rows = [
+            row
+            for row in rows
+            if transition in row["transitions"]
+        ]
+
+    rows.sort(
+        key=lambda row: (
+            abs(
+                float(
+                    row.get(
+                        "attentionScoreDelta"
+                    )
+                    or 0.0
+                )
+            ),
+            abs(
+                float(
+                    row.get(
+                        "workloadUnitsDelta"
+                    )
+                    or 0.0
+                )
+            ),
+            str(row["vehicleId"]),
+        ),
+        reverse=True,
+    )
+
+    selected = rows[:limit]
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": FLEET_CHANGE_RULES_VERSION,
+        "fromSnapshotId": from_snapshot.id,
+        "toSnapshotId": (
+            to_snapshot.id
+            if to_snapshot is not None
+            else None
+        ),
+        "toCurrent": to_snapshot is None,
+        "transitionFilter": transition,
+        "changedOnly": changed_only,
+        "totalMatching": len(rows),
+        "returned": len(selected),
+        "vehicles": selected,
+        "scopePolicy": _fleet_change_scope_policy(),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+
+# Phase 7.4 — Capacity & Maintenance Planning Simulator
+#
+# Synthetic workflow-capacity planning only. Capacity units are prioritization
+# units, not technician hours, physical service duration, labor estimates,
+# failure-risk reduction, or automatic maintenance execution.
+
+
+class CapacityPlanningSimulationRequest(BaseModel):
+    capacityUnits: float = Field(ge=0.0, le=100000.0)
+    strategy: str = Field(default="BALANCED")
+    maxVehicles: int | None = Field(
+        default=None,
+        ge=1,
+        le=500,
+    )
+    allowedMaintenanceTiers: list[str] = Field(
+        default_factory=list
+    )
+    allowedDecisionStates: list[str] = Field(
+        default_factory=list
+    )
+    runId: int | None = Field(
+        default=None,
+        ge=1,
+    )
+
+
+def _capacity_planning_scope_policy() -> dict:
+    return {
+        "selectedRunOnly": True,
+        "defaultRunSelection": "latest_persisted_trained_run",
+        "activeTelemetryExperimentRequired": False,
+        "exactExperimentOnly": True,
+        "scoringContextBoundedToPredictionAnchor": True,
+        "postRunTelemetryUsed": False,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "simulationWrites": False,
+        "automaticExecution": False,
+        "automaticScheduling": False,
+        "technicianHours": False,
+        "physicalServiceDuration": False,
+        "physicalOutcomePrediction": False,
+        "physicalRiskReduction": False,
+        "causalMaintenanceEffect": False,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+    }
+
+
+@router.get("/capacity-planning/strategies")
+def capacity_planning_strategies() -> dict:
+    return {
+        "rulesVersion": CAPACITY_PLANNING_RULES_VERSION,
+        "strategies": list(
+            CAPACITY_PLANNING_STRATEGIES
+        ),
+        "scopePolicy": _capacity_planning_scope_policy(),
+        "interpretationPolicy": (
+            "Strategies order synthetic operational workload only. "
+            "They do not rank physical failure probability or technician "
+            "service duration."
+        ),
+    }
+
+
+@router.post("/capacity-planning/simulate")
+def capacity_planning_simulate(
+    request: CapacityPlanningSimulationRequest,
+    db: Session = Depends(db_session),
+) -> dict:
+    if request.strategy not in CAPACITY_PLANNING_STRATEGIES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported capacity planning strategy"
+                ),
+                "allowed": list(
+                    CAPACITY_PLANNING_STRATEGIES
+                ),
+            },
+        )
+
+    unknown_states = sorted(
+        set(request.allowedDecisionStates)
+        - set(DECISION_STATES)
+    )
+
+    if unknown_states:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported decision states"
+                ),
+                "invalid": unknown_states,
+                "allowed": list(DECISION_STATES),
+            },
+        )
+
+    experiment_id, run, records = (
+        _current_fleet_twin_records(
+            db,
+            run_id=request.runId,
+        )
+    )
+
+    result = simulate_capacity_plan(
+        records,
+        capacity_units=request.capacityUnits,
+        strategy=request.strategy,
+        max_vehicles=request.maxVehicles,
+        allowed_maintenance_tiers=(
+            request.allowedMaintenanceTiers
+            or None
+        ),
+        allowed_decision_states=(
+            request.allowedDecisionStates
+            or None
+        ),
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        **result,
+        "scopePolicy": _capacity_planning_scope_policy(),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+
+# Phase 7.5 — Policy & Workflow Effectiveness
+#
+# Read-only analysis of deterministic policy/action lifecycle metadata.
+# Current target observation does not establish causal policy effectiveness,
+# physical repair success, failure prevention, reliability improvement, or
+# physical risk reduction.
+
+
+def _workflow_effectiveness_scope_policy() -> dict:
+    return {
+        "selectedRunOnly": True,
+        "defaultRunSelection": "latest_persisted_trained_run",
+        "activeTelemetryExperimentRequired": False,
+        "exactExperimentOnly": True,
+        "runFrozenPrognosticInputs": True,
+        "usesCurrentWorkflowMetadata": True,
+        "postRunTelemetryUsed": False,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "analysisWrites": False,
+        "automaticExecution": False,
+        "causalAttribution": False,
+        "physicalMaintenanceEffectiveness": False,
+        "failurePreventionClaim": False,
+        "reliabilityImprovementClaim": False,
+        "physicalRiskReduction": False,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+    }
+
+
+def _workflow_effectiveness_inputs(
+    db: Session,
+    *,
+    run_id: int | None,
+) -> tuple[
+    str,
+    DiagnosticModelRun,
+    list[DiagnosticAutomationPolicy],
+    list[DiagnosticAutomationAction],
+    list[dict],
+    dict[str, dict],
+    dict[str, int],
+]:
+    experiment_id, run = _resolve_vehicle_twin_run(
+        db,
+        run_id,
+    )
+
+    policies = _current_automation_policies(
+        db,
+        run_id=run.id,
+        experiment_id=experiment_id,
+    )
+
+    actions = db.execute(
+        select(DiagnosticAutomationAction)
+        .where(
+            DiagnosticAutomationAction.run_id == run.id,
+            DiagnosticAutomationAction.experiment_id
+            == experiment_id,
+        )
+        .order_by(
+            DiagnosticAutomationAction.created_at,
+            DiagnosticAutomationAction.id,
+        )
+    ).scalars().all()
+
+    (
+        prognostic_experiment_id,
+        prognostic_run,
+        prognostic_records,
+    ) = _current_prognostic_records(
+        db,
+        selected_run=run,
+    )
+
+    if (
+        prognostic_run.id != run.id
+        or prognostic_experiment_id != experiment_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Prognostic workflow inputs are not aligned "
+                "to the selected effectiveness run"
+            ),
+        )
+
+    (
+        fleet_experiment_id,
+        fleet_run,
+        fleet_records,
+    ) = _current_fleet_twin_records(
+        db,
+        run_id=run.id,
+    )
+
+    if (
+        fleet_run.id != run.id
+        or fleet_experiment_id != experiment_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Current fleet workflow metadata is not aligned "
+                "to the selected effectiveness run"
+            ),
+        )
+
+    current_by_vehicle = {
+        str(record["vehicleId"]): record
+        for record in fleet_records
+    }
+
+    matches = _automation_matches(
+        prognostic_records,
+        policies,
+        include_disabled=False,
+    )
+
+    current_matches_by_policy = {
+        policy.policy_key: sum(
+            1
+            for item in matches
+            if item["policy"]["key"] == policy.policy_key
+        )
+        for policy in policies
+    }
+
+    return (
+        experiment_id,
+        run,
+        policies,
+        actions,
+        prognostic_records,
+        current_by_vehicle,
+        current_matches_by_policy,
+    )
+
+
+def _workflow_action_record(
+    row: DiagnosticAutomationAction,
+) -> dict:
+    return {
+        "actionId": row.id,
+        "policyId": row.policy_id,
+        "policyKey": row.policy_key,
+        "vehicleId": row.vehicle_id,
+        "caseId": row.case_id,
+        "actionType": row.action_type,
+        "severity": row.severity,
+        "status": row.status,
+        "createdAt": row.created_at,
+        "approvedAt": row.approved_at,
+        "rejectedAt": row.rejected_at,
+        "executedAt": row.executed_at,
+        "sourceSnapshot": _json_object(
+            row.source_snapshot_json
+        ),
+    }
+
+
+def _workflow_policy_summary(
+    policy: DiagnosticAutomationPolicy,
+    actions: list[DiagnosticAutomationAction],
+    current_by_vehicle: dict[str, dict],
+    current_matches_by_policy: dict[str, int],
+) -> dict:
+    policy_actions = [
+        row
+        for row in actions
+        if row.policy_key == policy.policy_key
+    ]
+
+    action_records = [
+        _workflow_action_record(row)
+        for row in policy_actions
+    ]
+
+    summary = summarize_policy_effectiveness(
+        policy_key=policy.policy_key,
+        actions=action_records,
+        current_by_vehicle=current_by_vehicle,
+        current_match_count=current_matches_by_policy.get(
+            policy.policy_key,
+            0,
+        ),
+    )
+
+    return {
+        "policyId": policy.id,
+        "policyKey": policy.policy_key,
+        "policyName": policy.name,
+        "enabled": bool(policy.enabled),
+        "priority": int(policy.priority),
+        "severity": policy.severity,
+        "actionType": policy.action_type,
+        "requiresApproval": bool(
+            policy.requires_approval
+        ),
+        **{
+            key: value
+            for key, value in summary.items()
+            if key != "policyKey"
+        },
+    }
+
+
+@router.get("/workflow-effectiveness/summary")
+def workflow_effectiveness_summary(
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    (
+        experiment_id,
+        run,
+        policies,
+        actions,
+        _,
+        current_by_vehicle,
+        current_matches_by_policy,
+    ) = _workflow_effectiveness_inputs(
+        db,
+        run_id=run_id,
+    )
+
+    policy_summaries = [
+        _workflow_policy_summary(
+            policy,
+            actions,
+            current_by_vehicle,
+            current_matches_by_policy,
+        )
+        for policy in policies
+    ]
+
+    aggregate = summarize_workflow_effectiveness(
+        policy_summaries
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            WORKFLOW_EFFECTIVENESS_RULES_VERSION
+        ),
+        "enabledPolicies": sum(
+            1
+            for policy in policies
+            if policy.enabled
+        ),
+        **aggregate,
+        "scopePolicy": (
+            _workflow_effectiveness_scope_policy()
+        ),
+        "interpretationPolicy": (
+            "Effectiveness describes deterministic policy/action workflow "
+            "throughput and current target-state observation. It does not "
+            "prove that automation caused a workflow state, repaired a "
+            "component, prevented failure, improved reliability, or reduced "
+            "physical risk."
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get("/workflow-effectiveness/policies")
+def workflow_effectiveness_policies(
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    (
+        experiment_id,
+        run,
+        policies,
+        actions,
+        _,
+        current_by_vehicle,
+        current_matches_by_policy,
+    ) = _workflow_effectiveness_inputs(
+        db,
+        run_id=run_id,
+    )
+
+    rows = [
+        _workflow_policy_summary(
+            policy,
+            actions,
+            current_by_vehicle,
+            current_matches_by_policy,
+        )
+        for policy in policies
+    ]
+
+    rows.sort(
+        key=lambda row: (
+            int(row.get("executed") or 0),
+            int(row.get("materializedActions") or 0),
+            int(row.get("priority") or 0),
+            str(row.get("policyKey") or ""),
+        ),
+        reverse=True,
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            WORKFLOW_EFFECTIVENESS_RULES_VERSION
+        ),
+        "totalPolicies": len(rows),
+        "policies": rows,
+        "scopePolicy": (
+            _workflow_effectiveness_scope_policy()
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get(
+    "/workflow-effectiveness/policies/{policy_key}"
+)
+def workflow_effectiveness_policy_detail(
+    policy_key: str,
+    run_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    (
+        experiment_id,
+        run,
+        policies,
+        actions,
+        _,
+        current_by_vehicle,
+        current_matches_by_policy,
+    ) = _workflow_effectiveness_inputs(
+        db,
+        run_id=run_id,
+    )
+
+    policy = next(
+        (
+            row
+            for row in policies
+            if row.policy_key == policy_key
+        ),
+        None,
+    )
+
+    if policy is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Automation policy {policy_key!r} "
+                f"was not found in selected run {run.id}"
+            ),
+        )
+
+    policy_actions = [
+        row
+        for row in actions
+        if row.policy_key == policy.policy_key
+    ]
+
+    action_records = [
+        _workflow_action_record(row)
+        for row in policy_actions
+    ]
+
+    summary = _workflow_policy_summary(
+        policy,
+        actions,
+        current_by_vehicle,
+        current_matches_by_policy,
+    )
+
+    action_rows = policy_action_effectiveness_rows(
+        action_records,
+        current_by_vehicle,
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            WORKFLOW_EFFECTIVENESS_RULES_VERSION
+        ),
+        "policy": summary,
+        "actions": action_rows,
+        "scopePolicy": (
+            _workflow_effectiveness_scope_policy()
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
 
 @router.get("/summary")
 def diagnostics_summary(
