@@ -649,3 +649,36 @@ class DiagnosticAutomationActivity(Base):
             "created_at",
         ),
     )
+class DiagnosticFleetDecisionSnapshot(Base):
+    __tablename__ = "diagnostic_fleet_decision_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    rules_version: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+    )
+    actor: Mapped[str] = mapped_column(String(64), default="operator")
+    label: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    state_hash: Mapped[str] = mapped_column(String(64), index=True)
+    vehicle_count: Mapped[int] = mapped_column(Integer)
+    summary_json: Mapped[str] = mapped_column(Text, default="{}")
+    records_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "state_hash",
+            name="uq_fleet_decision_snapshot_run_hash",
+        ),
+        Index(
+            "ix_fleet_decision_snapshot_run_created",
+            "run_id",
+            "created_at",
+        ),
+    )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 
@@ -79,9 +80,20 @@ from fleetmind_common.diagnostic_store import (
     DiagnosticWatchlistEntry,
     DiagnosticEpisode,
     DiagnosticEvent,
+    DiagnosticFleetDecisionSnapshot,
     DiagnosticModelRun,
     DiagnosticPrediction,
     DiagnosticReplayPoint,
+)
+from fleetmind_common.fleet_decision_rules import (
+    COHORT_DIMENSIONS,
+    COVERAGE_GAPS,
+    DECISION_STATES,
+    FLEET_DECISION_RULES_VERSION,
+    FLEET_DECISION_SCENARIOS,
+    apply_workflow_scenario,
+    derive_fleet_decision,
+    summarize_fleet_records,
 )
 from fleetmind_common.models import Telemetry
 
@@ -4261,6 +4273,682 @@ def execute_diagnostic_automation_action(
         ),
     }
 
+# Phase 7.0 — Fleet State & Decision Intelligence
+#
+# This layer synthesizes current-run model outputs, run-frozen prognostic
+# records, and explicit workflow metadata. The resulting decision state,
+# attention score, workload units, coverage gaps, cohorts and scenarios are
+# operational constructs only. They are not physical health states, failure
+# probabilities, RUL, attribution, causal proof, or labor-hour estimates.
+
+
+class FleetDecisionScenarioRequest(BaseModel):
+    scenario: str
+
+
+class FleetDecisionSnapshotCreate(BaseModel):
+    actor: str = Field(default="operator", min_length=1, max_length=64)
+    label: str | None = Field(default=None, max_length=160)
+
+
+def _fleet_decision_scope_policy() -> dict:
+    return {
+        "currentRunOnly": True,
+        "exactExperimentOnly": True,
+        "runFrozenPrognosticInputs": True,
+        "usesTelemetry": False,
+        "usesPostRunTelemetry": False,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "automaticExecution": False,
+        "workflowScenarioWrites": False,
+        "physicalRiskScore": False,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+    }
+
+
+def _current_fleet_decision_records(
+    db: Session,
+) -> tuple[str, DiagnosticModelRun, list[dict]]:
+    experiment_id, run = _require_current_run(db)
+
+    predictions = db.execute(
+        select(DiagnosticPrediction)
+        .where(
+            DiagnosticPrediction.run_id == run.id,
+            DiagnosticPrediction.experiment_id == experiment_id,
+        )
+        .order_by(DiagnosticPrediction.vehicle_id)
+    ).scalars().all()
+
+    _, prognostic_run, prognostic_records = _current_prognostic_records(db)
+    if prognostic_run.id != run.id:
+        raise HTTPException(
+            status_code=409,
+            detail="Prognostic records are not aligned to the current run",
+        )
+
+    cases = db.execute(
+        select(DiagnosticCase).where(
+            DiagnosticCase.run_id == run.id,
+            DiagnosticCase.experiment_id == experiment_id,
+        )
+    ).scalars().all()
+    case_map = {row.id: row for row in cases}
+
+    best_prognostic_by_vehicle: dict[str, dict] = {}
+    for record in prognostic_records:
+        vehicle_id = str(record["vehicleId"])
+        previous = best_prognostic_by_vehicle.get(vehicle_id)
+        if previous is None or float(record.get("priorityScore") or 0.0) > float(
+            previous.get("priorityScore") or 0.0
+        ):
+            best_prognostic_by_vehicle[vehicle_id] = record
+
+    actions = db.execute(
+        select(DiagnosticAutomationAction).where(
+            DiagnosticAutomationAction.run_id == run.id,
+            DiagnosticAutomationAction.experiment_id == experiment_id,
+        )
+    ).scalars().all()
+
+    automation_by_vehicle: dict[str, list[DiagnosticAutomationAction]] = {}
+    for action in actions:
+        automation_by_vehicle.setdefault(action.vehicle_id, []).append(action)
+
+    records: list[dict] = []
+    for prediction in predictions:
+        prognostic = best_prognostic_by_vehicle.get(prediction.vehicle_id)
+        case = (
+            case_map.get(int(prognostic["caseId"]))
+            if prognostic is not None
+            else None
+        )
+        plan = (
+            prognostic.get("maintenancePlan")
+            if prognostic is not None
+            else None
+        )
+        vehicle_actions = automation_by_vehicle.get(prediction.vehicle_id, [])
+        automation_statuses = sorted({row.status for row in vehicle_actions})
+        pending_action_types = sorted(
+            {
+                row.action_type
+                for row in vehicle_actions
+                if row.status == AUTOMATION_STATUS_PENDING_APPROVAL
+            }
+        )
+
+        input_record = {
+            "vehicleId": prediction.vehicle_id,
+            "topClass": prediction.top_class,
+            "topConfidence": round(float(prediction.top_confidence), 6),
+            "anchorTimestamp": prediction.anchor_timestamp.isoformat(),
+            "anchorMileage": round(float(prediction.anchor_mileage), 1),
+            "caseId": (
+                int(prognostic["caseId"])
+                if prognostic is not None
+                else None
+            ),
+            "episodeId": (
+                int(prognostic["episodeId"])
+                if prognostic is not None
+                else None
+            ),
+            "caseStatus": (
+                prognostic.get("caseStatus")
+                if prognostic is not None
+                else None
+            ),
+            "reviewPriority": (
+                prognostic.get("reviewPriority")
+                if prognostic is not None
+                else None
+            ),
+            "assignedTo": case.assigned_to if case is not None else None,
+            "episodeState": (
+                prognostic.get("episodeState")
+                if prognostic is not None
+                else None
+            ),
+            "maintenanceTier": (
+                prognostic.get("maintenanceTier")
+                if prognostic is not None
+                else None
+            ),
+            "maintenancePlanState": (
+                plan.get("state")
+                if isinstance(plan, dict)
+                else None
+            ),
+            "maintenancePlanId": (
+                plan.get("id")
+                if isinstance(plan, dict)
+                else None
+            ),
+            "watchlisted": bool(
+                prognostic.get("watchlisted")
+                if prognostic is not None
+                else False
+            ),
+            "trajectoryEligible": (
+                bool(prognostic.get("trajectoryEligible"))
+                if prognostic is not None
+                else None
+            ),
+            "priorityScore": (
+                prognostic.get("priorityScore")
+                if prognostic is not None
+                else None
+            ),
+            "recommendedReviewWindow": (
+                prognostic.get("recommendedReviewWindow")
+                if prognostic is not None
+                else None
+            ),
+            "automationStatuses": automation_statuses,
+            "pendingActionTypes": pending_action_types,
+            "automationActionIds": sorted(row.id for row in vehicle_actions),
+        }
+        records.append(derive_fleet_decision(input_record))
+
+    records.sort(
+        key=lambda row: (
+            float(row.get("attentionScore") or 0.0),
+            float(row.get("topConfidence") or 0.0),
+            row["vehicleId"],
+        ),
+        reverse=True,
+    )
+    return experiment_id, run, records
+
+
+def _fleet_decision_snapshot_payload(
+    row: DiagnosticFleetDecisionSnapshot,
+    *,
+    include_records: bool = False,
+) -> dict:
+    payload = {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "rulesVersion": row.rules_version,
+        "createdAt": row.created_at.isoformat(),
+        "actor": row.actor,
+        "label": row.label,
+        "stateHash": row.state_hash,
+        "vehicleCount": int(row.vehicle_count),
+        "summary": _json_object(row.summary_json),
+    }
+    if include_records:
+        payload["records"] = _json_list(row.records_json)
+    return payload
+
+
+@router.get("/fleet-intelligence/summary")
+def fleet_decision_summary(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_fleet_decision_records(db)
+    summary = summarize_fleet_records(records)
+    snapshot_count = int(
+        db.scalar(
+            select(func.count(DiagnosticFleetDecisionSnapshot.id)).where(
+                DiagnosticFleetDecisionSnapshot.run_id == run.id,
+                DiagnosticFleetDecisionSnapshot.experiment_id == experiment_id,
+            )
+        )
+        or 0
+    )
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": FLEET_DECISION_RULES_VERSION,
+        **summary,
+        "snapshots": snapshot_count,
+        "scopePolicy": _fleet_decision_scope_policy(),
+        "interpretationPolicy": (
+            "Fleet decision state, attention score, workload units and coverage "
+            "debt are deterministic operational constructs derived from current-"
+            "run model hypotheses and workflow metadata. They are not physical "
+            "health or failure-risk scores, RUL, attribution, or causal proof."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/fleet-intelligence/vehicles")
+def fleet_decision_vehicles(
+    limit: int = Query(default=100, ge=1, le=500),
+    decision_state: str | None = Query(default=None),
+    gap: str | None = Query(default=None),
+    hypothesis_class: str | None = Query(default=None),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_fleet_decision_records(db)
+
+    if decision_state is not None and decision_state not in DECISION_STATES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported fleet decision state",
+                "allowed": list(DECISION_STATES),
+            },
+        )
+    if gap is not None and gap not in COVERAGE_GAPS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported fleet coverage gap",
+                "allowed": list(COVERAGE_GAPS),
+            },
+        )
+
+    filtered = records
+    if decision_state is not None:
+        filtered = [
+            row
+            for row in filtered
+            if row["decisionState"] == decision_state
+        ]
+    if gap is not None:
+        filtered = [
+            row
+            for row in filtered
+            if gap in row["coverageGaps"]
+        ]
+    if hypothesis_class is not None:
+        filtered = [
+            row
+            for row in filtered
+            if row["topClass"] == hypothesis_class
+        ]
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": FLEET_DECISION_RULES_VERSION,
+        "totalMatched": len(filtered),
+        "returned": min(limit, len(filtered)),
+        "filters": {
+            "decisionState": decision_state,
+            "gap": gap,
+            "hypothesisClass": hypothesis_class,
+        },
+        "vehicles": filtered[:limit],
+        "scopePolicy": _fleet_decision_scope_policy(),
+    }
+
+
+@router.get("/fleet-intelligence/vehicles/{vehicle_id}")
+def fleet_decision_vehicle_detail(
+    vehicle_id: str,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_fleet_decision_records(db)
+    record = next(
+        (row for row in records if row["vehicleId"] == vehicle_id),
+        None,
+    )
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Vehicle is not present in current fleet decision state",
+        )
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": FLEET_DECISION_RULES_VERSION,
+        "vehicle": record,
+        "scopePolicy": _fleet_decision_scope_policy(),
+        "interpretationPolicy": (
+            "Vehicle decision state is an operational synthesis of model "
+            "hypothesis and workflow metadata, not a physical digital-twin "
+            "claim or proof of component condition."
+        ),
+    }
+
+
+@router.get("/fleet-intelligence/coverage")
+def fleet_decision_coverage(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_fleet_decision_records(db)
+    rows = []
+    for gap in COVERAGE_GAPS:
+        affected = [
+            record
+            for record in records
+            if gap in record["coverageGaps"]
+        ]
+        rows.append(
+            {
+                "gap": gap,
+                "vehicles": len(affected),
+                "workloadUnits": round(
+                    sum(float(row["workloadUnits"]) for row in affected),
+                    2,
+                ),
+                "averageAttentionScore": (
+                    round(
+                        sum(float(row["attentionScore"]) for row in affected)
+                        / len(affected),
+                        3,
+                    )
+                    if affected
+                    else None
+                ),
+            }
+        )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": FLEET_DECISION_RULES_VERSION,
+        "vehiclesWithCoverageGaps": sum(
+            1 for record in records if record["coverageGaps"]
+        ),
+        "coverageGapInstances": sum(row["vehicles"] for row in rows),
+        "gaps": rows,
+        "scopePolicy": _fleet_decision_scope_policy(),
+    }
+
+
+@router.get("/fleet-intelligence/cohorts")
+def fleet_decision_cohorts(
+    dimension: str = Query(default="hypothesisClass"),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_fleet_decision_records(db)
+    if dimension not in COHORT_DIMENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported fleet decision cohort dimension",
+                "allowed": list(COHORT_DIMENSIONS),
+            },
+        )
+
+    field_map = {
+        "hypothesisClass": "topClass",
+        "decisionState": "decisionState",
+        "maintenanceTier": "maintenanceTier",
+        "reviewPriority": "reviewPriority",
+    }
+
+    grouped: dict[str, list[dict]] = {}
+    if dimension == "automationStatus":
+        for record in records:
+            statuses = record.get("automationStatuses") or ["NONE"]
+            for status in statuses:
+                grouped.setdefault(str(status), []).append(record)
+    else:
+        field = field_map[dimension]
+        for record in records:
+            key = str(record.get(field) or "NONE")
+            grouped.setdefault(key, []).append(record)
+
+    cohorts = []
+    for key, members in grouped.items():
+        cohorts.append(
+            {
+                "key": key,
+                "vehicles": len(members),
+                "workloadUnits": round(
+                    sum(float(row["workloadUnits"]) for row in members),
+                    2,
+                ),
+                "coverageGapInstances": sum(
+                    len(row["coverageGaps"]) for row in members
+                ),
+                "averageAttentionScore": round(
+                    sum(float(row["attentionScore"]) for row in members)
+                    / len(members),
+                    3,
+                ),
+            }
+        )
+    cohorts.sort(
+        key=lambda row: (
+            float(row["workloadUnits"]),
+            int(row["vehicles"]),
+            row["key"],
+        ),
+        reverse=True,
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": FLEET_DECISION_RULES_VERSION,
+        "dimension": dimension,
+        "cohorts": cohorts,
+        "interpretationPolicy": (
+            "Cohorts describe concentration of current operational attention and "
+            "workflow load. They do not estimate normalized physical failure risk "
+            "or causal effects."
+        ),
+    }
+
+
+@router.post("/fleet-intelligence/scenario")
+def fleet_decision_scenario(
+    request: FleetDecisionScenarioRequest,
+    db: Session = Depends(db_session),
+) -> dict:
+    if request.scenario not in FLEET_DECISION_SCENARIOS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported fleet workflow scenario",
+                "allowed": list(FLEET_DECISION_SCENARIOS),
+            },
+        )
+
+    experiment_id, run, records = _current_fleet_decision_records(db)
+    simulated = [
+        apply_workflow_scenario(record, request.scenario)
+        for record in records
+    ]
+    before = summarize_fleet_records(records)
+    after = summarize_fleet_records(simulated)
+
+    transitions: dict[tuple[str, str], int] = {}
+    changed_vehicles = 0
+    for current, projected in zip(records, simulated):
+        changed = (
+            current["decisionState"] != projected["decisionState"]
+            or current["coverageGaps"] != projected["coverageGaps"]
+            or current["workloadUnits"] != projected["workloadUnits"]
+        )
+        if changed:
+            changed_vehicles += 1
+        if current["decisionState"] != projected["decisionState"]:
+            key = (
+                current["decisionState"],
+                projected["decisionState"],
+            )
+            transitions[key] = transitions.get(key, 0) + 1
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": FLEET_DECISION_RULES_VERSION,
+        "scenario": request.scenario,
+        "simulationOnly": True,
+        "changedVehicles": changed_vehicles,
+        "before": before,
+        "after": after,
+        "deltas": {
+            "workloadUnits": round(
+                float(after["totalWorkloadUnits"])
+                - float(before["totalWorkloadUnits"]),
+                2,
+            ),
+            "vehiclesWithCoverageGaps": (
+                int(after["vehiclesWithCoverageGaps"])
+                - int(before["vehiclesWithCoverageGaps"])
+            ),
+            "coverageGapInstances": (
+                int(after["coverageGapInstances"])
+                - int(before["coverageGapInstances"])
+            ),
+        },
+        "stateTransitions": [
+            {
+                "fromState": from_state,
+                "toState": to_state,
+                "vehicles": count,
+            }
+            for (from_state, to_state), count in sorted(
+                transitions.items()
+            )
+        ],
+        "scopePolicy": _fleet_decision_scope_policy(),
+        "interpretationPolicy": (
+            "Scenario results are no-write workflow counterfactuals. They change "
+            "assumptions about assignment, approval-queue execution, plans and "
+            "watchlists only; they do not project physical failures, component "
+            "health, maintenance outcomes, labor hours, or causal effects."
+        ),
+    }
+
+
+@router.post("/fleet-intelligence/snapshots")
+def create_fleet_decision_snapshot(
+    request: FleetDecisionSnapshotCreate,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_fleet_decision_records(db)
+    summary = summarize_fleet_records(records)
+    canonical = json.dumps(records, sort_keys=True, separators=(",", ":"))
+    state_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    existing = db.execute(
+        select(DiagnosticFleetDecisionSnapshot)
+        .where(
+            DiagnosticFleetDecisionSnapshot.run_id == run.id,
+            DiagnosticFleetDecisionSnapshot.experiment_id == experiment_id,
+            DiagnosticFleetDecisionSnapshot.rules_version
+            == FLEET_DECISION_RULES_VERSION,
+            DiagnosticFleetDecisionSnapshot.state_hash == state_hash,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        return {
+            "created": False,
+            "snapshot": _fleet_decision_snapshot_payload(existing),
+            "interpretationPolicy": (
+                "Identical derived fleet state already has a checkpoint. No "
+                "diagnostic evidence or workflow metadata was modified."
+            ),
+        }
+
+    row = DiagnosticFleetDecisionSnapshot(
+        run_id=run.id,
+        experiment_id=experiment_id,
+        rules_version=FLEET_DECISION_RULES_VERSION,
+        created_at=datetime.now(timezone.utc),
+        actor=request.actor,
+        label=(
+            request.label.strip()
+            if request.label is not None and request.label.strip()
+            else None
+        ),
+        state_hash=state_hash,
+        vehicle_count=len(records),
+        summary_json=json.dumps(summary, sort_keys=True),
+        records_json=canonical,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    return {
+        "created": True,
+        "snapshot": _fleet_decision_snapshot_payload(row),
+        "scopePolicy": _fleet_decision_scope_policy(),
+        "interpretationPolicy": (
+            "Snapshot persistence stores derived fleet decision state only. It "
+            "does not rewrite predictions, replay, events, episodes, cases, "
+            "maintenance plans, automation actions, model artifacts, benchmark "
+            "evidence, or private failure truth."
+        ),
+    }
+
+
+@router.get("/fleet-intelligence/snapshots")
+def fleet_decision_snapshots(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    total = int(
+        db.scalar(
+            select(func.count(DiagnosticFleetDecisionSnapshot.id)).where(
+                DiagnosticFleetDecisionSnapshot.run_id == run.id,
+                DiagnosticFleetDecisionSnapshot.experiment_id == experiment_id,
+            )
+        )
+        or 0
+    )
+    rows = db.execute(
+        select(DiagnosticFleetDecisionSnapshot)
+        .where(
+            DiagnosticFleetDecisionSnapshot.run_id == run.id,
+            DiagnosticFleetDecisionSnapshot.experiment_id == experiment_id,
+        )
+        .order_by(
+            desc(DiagnosticFleetDecisionSnapshot.created_at),
+            desc(DiagnosticFleetDecisionSnapshot.id),
+        )
+        .limit(limit)
+    ).scalars().all()
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": FLEET_DECISION_RULES_VERSION,
+        "total": total,
+        "returned": len(rows),
+        "snapshots": [
+            _fleet_decision_snapshot_payload(row)
+            for row in rows
+        ],
+        "scopePolicy": _fleet_decision_scope_policy(),
+    }
+
+
+@router.get("/fleet-intelligence/snapshots/{snapshot_id}")
+def fleet_decision_snapshot_detail(
+    snapshot_id: int,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    row = db.execute(
+        select(DiagnosticFleetDecisionSnapshot)
+        .where(
+            DiagnosticFleetDecisionSnapshot.id == snapshot_id,
+            DiagnosticFleetDecisionSnapshot.run_id == run.id,
+            DiagnosticFleetDecisionSnapshot.experiment_id == experiment_id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Fleet decision snapshot not found in current run",
+        )
+    return {
+        "snapshot": _fleet_decision_snapshot_payload(
+            row,
+            include_records=True,
+        ),
+        "scopePolicy": _fleet_decision_scope_policy(),
+    }
 
 @router.get("/summary")
 def diagnostics_summary(
