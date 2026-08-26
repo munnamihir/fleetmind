@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
@@ -11,10 +12,21 @@ from fleetmind_common.db import SessionLocal
 from fleetmind_common.diagnostic_event_rules import (
     DIAGNOSTIC_EVENT_TYPES,
 )
+from fleetmind_common.diagnostic_case_rules import (
+    CASE_ACTIVITY_ASSIGNED,
+    CASE_ACTIVITY_NOTE_ADDED,
+    CASE_ACTIVITY_PRIORITY_CHANGED,
+    CASE_ACTIVITY_STATUS_CHANGED,
+    CASE_CLOSED,
+    DIAGNOSTIC_CASE_PRIORITIES,
+    DIAGNOSTIC_CASE_STATUSES,
+)
 from fleetmind_common.diagnostic_episode_rules import (
     DIAGNOSTIC_EPISODE_STATES,
 )
 from fleetmind_common.diagnostic_store import (
+    DiagnosticCase,
+    DiagnosticCaseActivity,
     DiagnosticEpisode,
     DiagnosticEvent,
     DiagnosticModelRun,
@@ -1148,6 +1160,504 @@ def diagnostic_episodes_summary(
         },
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
+
+
+
+class DiagnosticCaseUpdate(BaseModel):
+    status: str | None = None
+    review_priority: str | None = None
+    assigned_to: str | None = Field(default=None, max_length=64)
+    clear_assignment: bool = False
+    actor: str = Field(default="operator", min_length=1, max_length=64)
+
+
+class DiagnosticCaseNoteCreate(BaseModel):
+    note: str = Field(min_length=1, max_length=2000)
+    actor: str = Field(default="operator", min_length=1, max_length=64)
+
+
+def _diagnostic_case_payload(row: DiagnosticCase) -> dict:
+    return {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "episodeId": row.episode_id,
+        "rulesVersion": row.rules_version,
+        "sourceEpisodeRulesVersion": row.source_episode_rules_version,
+        "sourceEventRulesVersion": row.source_event_rules_version,
+        "vehicleId": row.vehicle_id,
+        "hypothesisClass": row.hypothesis_class,
+        "episodeStateAtCreation": row.episode_state_at_creation,
+        "status": row.status,
+        "reviewPriority": row.review_priority,
+        "assignedTo": row.assigned_to,
+        "title": row.title,
+        "startTimestamp": row.start_timestamp.isoformat(),
+        "startMileage": round(float(row.start_mileage), 1),
+        "latestTimestamp": row.latest_timestamp.isoformat(),
+        "latestMileage": round(float(row.latest_mileage), 1),
+        "observedSpanMiles": round(
+            max(0.0, float(row.latest_mileage) - float(row.start_mileage)),
+            1,
+        ),
+        "latestConfidence": (
+            round(float(row.latest_confidence), 6)
+            if row.latest_confidence is not None
+            else None
+        ),
+        "peakConfidence": (
+            round(float(row.peak_confidence), 6)
+            if row.peak_confidence is not None
+            else None
+        ),
+        "eventCount": int(row.event_count),
+        "leftCensored": bool(row.left_censored),
+        "noteCount": int(row.note_count),
+        "createdAt": row.created_at.isoformat(),
+        "updatedAt": row.updated_at.isoformat(),
+        "lastActivityAt": row.last_activity_at.isoformat(),
+        "details": _json_object(row.details_json),
+    }
+
+
+def _diagnostic_case_activity_payload(
+    row: DiagnosticCaseActivity,
+) -> dict:
+    return {
+        "id": row.id,
+        "caseId": row.case_id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "vehicleId": row.vehicle_id,
+        "createdAt": row.created_at.isoformat(),
+        "activityType": row.activity_type,
+        "actor": row.actor,
+        "fromValue": row.from_value,
+        "toValue": row.to_value,
+        "note": row.note_text,
+        "details": _json_object(row.details_json),
+    }
+
+
+def _require_current_case(
+    case_id: int,
+    db: Session,
+) -> tuple[str, DiagnosticModelRun, DiagnosticCase]:
+    experiment_id, run = _require_current_run(db)
+    row = db.execute(
+        select(DiagnosticCase)
+        .where(
+            DiagnosticCase.id == case_id,
+            DiagnosticCase.run_id == run.id,
+            DiagnosticCase.experiment_id == experiment_id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Diagnostic case not found in the current run",
+        )
+
+    return experiment_id, run, row
+
+
+@router.get("/cases")
+def diagnostic_cases(
+    limit: int = Query(default=100, ge=1, le=500),
+    status: str | None = Query(default=None),
+    review_priority: str | None = Query(default=None),
+    vehicle_id: str | None = Query(default=None),
+    hypothesis_class: str | None = Query(default=None),
+    assigned_to: str | None = Query(default=None),
+    unassigned_only: bool = Query(default=False),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+
+    if status is not None and status not in DIAGNOSTIC_CASE_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported diagnostic case status",
+                "allowed": list(DIAGNOSTIC_CASE_STATUSES),
+            },
+        )
+    if (
+        review_priority is not None
+        and review_priority not in DIAGNOSTIC_CASE_PRIORITIES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported diagnostic case priority",
+                "allowed": list(DIAGNOSTIC_CASE_PRIORITIES),
+            },
+        )
+
+    filters = [
+        DiagnosticCase.run_id == run.id,
+        DiagnosticCase.experiment_id == experiment_id,
+    ]
+
+    if status is not None:
+        filters.append(DiagnosticCase.status == status)
+    if review_priority is not None:
+        filters.append(
+            DiagnosticCase.review_priority == review_priority
+        )
+    if vehicle_id is not None:
+        filters.append(DiagnosticCase.vehicle_id == vehicle_id)
+    if hypothesis_class is not None:
+        filters.append(
+            DiagnosticCase.hypothesis_class == hypothesis_class
+        )
+    if assigned_to is not None:
+        filters.append(DiagnosticCase.assigned_to == assigned_to)
+    if unassigned_only:
+        filters.append(DiagnosticCase.assigned_to.is_(None))
+
+    total_matched = int(
+        db.scalar(select(func.count(DiagnosticCase.id)).where(*filters))
+        or 0
+    )
+    rows = db.execute(
+        select(DiagnosticCase)
+        .where(*filters)
+        .order_by(
+            desc(DiagnosticCase.last_activity_at),
+            desc(DiagnosticCase.updated_at),
+            desc(DiagnosticCase.id),
+        )
+        .limit(limit)
+    ).scalars().all()
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "champion": run.champion,
+        "totalMatched": total_matched,
+        "returned": len(rows),
+        "filters": {
+            "status": status,
+            "reviewPriority": review_priority,
+            "vehicleId": vehicle_id,
+            "hypothesisClass": hypothesis_class,
+            "assignedTo": assigned_to,
+            "unassignedOnly": unassigned_only,
+        },
+        "cases": [_diagnostic_case_payload(row) for row in rows],
+        "scopePolicy": {
+            "currentRunOnly": True,
+            "exactExperimentOnly": True,
+            "episodeDerivedSource": True,
+            "workflowMetadataSeparate": True,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+        },
+        "interpretationPolicy": (
+            "Cases organize persisted model-hypothesis episodes for "
+            "operational review. Review priority and operator workflow "
+            "metadata are not calibrated physical-failure risk, private "
+            "failure truth, attribution, or causal proof."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/cases/summary")
+def diagnostic_cases_summary(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    base_filters = (
+        DiagnosticCase.run_id == run.id,
+        DiagnosticCase.experiment_id == experiment_id,
+    )
+
+    total_cases = int(
+        db.scalar(select(func.count(DiagnosticCase.id)).where(*base_filters))
+        or 0
+    )
+    closed_cases = int(
+        db.scalar(
+            select(func.count(DiagnosticCase.id)).where(
+                *base_filters,
+                DiagnosticCase.status == CASE_CLOSED,
+            )
+        )
+        or 0
+    )
+    unassigned_cases = int(
+        db.scalar(
+            select(func.count(DiagnosticCase.id)).where(
+                *base_filters,
+                DiagnosticCase.assigned_to.is_(None),
+                DiagnosticCase.status != CASE_CLOSED,
+            )
+        )
+        or 0
+    )
+
+    status_rows = db.execute(
+        select(
+            DiagnosticCase.status,
+            func.count(DiagnosticCase.id),
+        )
+        .where(*base_filters)
+        .group_by(DiagnosticCase.status)
+    ).all()
+    priority_rows = db.execute(
+        select(
+            DiagnosticCase.review_priority,
+            func.count(DiagnosticCase.id),
+        )
+        .where(*base_filters)
+        .group_by(DiagnosticCase.review_priority)
+    ).all()
+    class_rows = db.execute(
+        select(
+            DiagnosticCase.hypothesis_class,
+            func.count(DiagnosticCase.id),
+        )
+        .where(*base_filters)
+        .group_by(DiagnosticCase.hypothesis_class)
+        .order_by(DiagnosticCase.hypothesis_class)
+    ).all()
+
+    status_map = {
+        str(case_status): int(count)
+        for case_status, count in status_rows
+    }
+    priority_map = {
+        str(priority): int(count)
+        for priority, count in priority_rows
+    }
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "champion": run.champion,
+        "totalCases": total_cases,
+        "activeCases": total_cases - closed_cases,
+        "closedCases": closed_cases,
+        "unassignedCases": unassigned_cases,
+        "byStatus": [
+            {
+                "status": value,
+                "cases": status_map.get(value, 0),
+            }
+            for value in DIAGNOSTIC_CASE_STATUSES
+        ],
+        "byPriority": [
+            {
+                "reviewPriority": value,
+                "cases": priority_map.get(value, 0),
+            }
+            for value in DIAGNOSTIC_CASE_PRIORITIES
+        ],
+        "byClass": [
+            {
+                "hypothesisClass": hypothesis_class,
+                "cases": int(count),
+            }
+            for hypothesis_class, count in class_rows
+        ],
+        "scopePolicy": {
+            "currentRunOnly": True,
+            "exactExperimentOnly": True,
+            "usesPrivateFailureTruth": False,
+            "failureMarkersExposed": False,
+        },
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/cases/{case_id}")
+def diagnostic_case_detail(
+    case_id: int,
+    activity_limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, case = _require_current_case(case_id, db)
+
+    activities = db.execute(
+        select(DiagnosticCaseActivity)
+        .where(
+            DiagnosticCaseActivity.case_id == case.id,
+            DiagnosticCaseActivity.run_id == run.id,
+            DiagnosticCaseActivity.experiment_id == experiment_id,
+        )
+        .order_by(
+            desc(DiagnosticCaseActivity.created_at),
+            desc(DiagnosticCaseActivity.id),
+        )
+        .limit(activity_limit)
+    ).scalars().all()
+
+    return {
+        "case": _diagnostic_case_payload(case),
+        "activities": [
+            _diagnostic_case_activity_payload(row)
+            for row in activities
+        ],
+        "interpretationPolicy": (
+            "The source episode remains diagnostic model evidence. "
+            "Activities are operator workflow metadata and do not rewrite "
+            "the source episode, events, replay, model, or benchmark."
+        ),
+    }
+
+
+@router.patch("/cases/{case_id}")
+def update_diagnostic_case(
+    case_id: int,
+    update: DiagnosticCaseUpdate,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, case = _require_current_case(case_id, db)
+    now = datetime.now(timezone.utc)
+    activities: list[DiagnosticCaseActivity] = []
+
+    if update.status is not None:
+        if update.status not in DIAGNOSTIC_CASE_STATUSES:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Unsupported diagnostic case status",
+                    "allowed": list(DIAGNOSTIC_CASE_STATUSES),
+                },
+            )
+        if update.status != case.status:
+            activities.append(
+                DiagnosticCaseActivity(
+                    case_id=case.id,
+                    run_id=run.id,
+                    experiment_id=experiment_id,
+                    vehicle_id=case.vehicle_id,
+                    created_at=now,
+                    activity_type=CASE_ACTIVITY_STATUS_CHANGED,
+                    actor=update.actor,
+                    from_value=case.status,
+                    to_value=update.status,
+                    note_text=None,
+                    details_json="{}",
+                )
+            )
+            case.status = update.status
+
+    if update.review_priority is not None:
+        if (
+            update.review_priority
+            not in DIAGNOSTIC_CASE_PRIORITIES
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Unsupported diagnostic case priority",
+                    "allowed": list(DIAGNOSTIC_CASE_PRIORITIES),
+                },
+            )
+        if update.review_priority != case.review_priority:
+            activities.append(
+                DiagnosticCaseActivity(
+                    case_id=case.id,
+                    run_id=run.id,
+                    experiment_id=experiment_id,
+                    vehicle_id=case.vehicle_id,
+                    created_at=now,
+                    activity_type=CASE_ACTIVITY_PRIORITY_CHANGED,
+                    actor=update.actor,
+                    from_value=case.review_priority,
+                    to_value=update.review_priority,
+                    note_text=None,
+                    details_json="{}",
+                )
+            )
+            case.review_priority = update.review_priority
+
+    target_assignment = case.assigned_to
+    assignment_requested = False
+    if update.clear_assignment:
+        target_assignment = None
+        assignment_requested = True
+    elif update.assigned_to is not None:
+        value = update.assigned_to.strip()
+        target_assignment = value or None
+        assignment_requested = True
+
+    if assignment_requested and target_assignment != case.assigned_to:
+        activities.append(
+            DiagnosticCaseActivity(
+                case_id=case.id,
+                run_id=run.id,
+                experiment_id=experiment_id,
+                vehicle_id=case.vehicle_id,
+                created_at=now,
+                activity_type=CASE_ACTIVITY_ASSIGNED,
+                actor=update.actor,
+                from_value=case.assigned_to,
+                to_value=target_assignment,
+                note_text=None,
+                details_json="{}",
+            )
+        )
+        case.assigned_to = target_assignment
+
+    if activities:
+        case.updated_at = now
+        case.last_activity_at = now
+        for activity in activities:
+            db.add(activity)
+        db.add(case)
+        db.commit()
+        db.refresh(case)
+
+    return _diagnostic_case_payload(case)
+
+
+@router.post("/cases/{case_id}/notes")
+def add_diagnostic_case_note(
+    case_id: int,
+    request: DiagnosticCaseNoteCreate,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, case = _require_current_case(case_id, db)
+    note = request.note.strip()
+    if not note:
+        raise HTTPException(
+            status_code=422,
+            detail="Diagnostic case note cannot be blank",
+        )
+
+    now = datetime.now(timezone.utc)
+    activity = DiagnosticCaseActivity(
+        case_id=case.id,
+        run_id=run.id,
+        experiment_id=experiment_id,
+        vehicle_id=case.vehicle_id,
+        created_at=now,
+        activity_type=CASE_ACTIVITY_NOTE_ADDED,
+        actor=request.actor,
+        from_value=None,
+        to_value=None,
+        note_text=note,
+        details_json="{}",
+    )
+
+    case.note_count += 1
+    case.updated_at = now
+    case.last_activity_at = now
+    db.add(activity)
+    db.add(case)
+    db.commit()
+    db.refresh(activity)
+
+    return _diagnostic_case_activity_payload(activity)
+
 
 @router.get("/summary")
 def diagnostics_summary(

@@ -269,3 +269,103 @@ class DiagnosticEpisode(Base):
             "hypothesis_class",
         ),
     )
+
+
+class DiagnosticCase(Base):
+    __tablename__ = "diagnostic_cases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    episode_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_episodes.id", ondelete="CASCADE"),
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
+    hypothesis_class: Mapped[str] = mapped_column(String(64), index=True)
+    rules_version: Mapped[str] = mapped_column(String(64), index=True)
+    source_episode_rules_version: Mapped[str] = mapped_column(String(64), index=True)
+    source_event_rules_version: Mapped[str] = mapped_column(String(64), index=True)
+    episode_state_at_creation: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    review_priority: Mapped[str] = mapped_column(String(16), index=True)
+    assigned_to: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    start_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    start_mileage: Mapped[float] = mapped_column(Float)
+    latest_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    latest_mileage: Mapped[float] = mapped_column(Float)
+    latest_confidence: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    peak_confidence: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    event_count: Mapped[int] = mapped_column(Integer, default=0)
+    left_censored: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    note_count: Mapped[int] = mapped_column(Integer, default=0)
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "episode_id",
+            name="uq_diagnostic_case_run_episode",
+        ),
+        Index(
+            "ix_diagnostic_case_run_status_priority_updated",
+            "run_id",
+            "status",
+            "review_priority",
+            "updated_at",
+        ),
+        Index(
+            "ix_diagnostic_case_run_vehicle_status",
+            "run_id",
+            "vehicle_id",
+            "status",
+        ),
+        Index(
+            "ix_diagnostic_case_experiment_class",
+            "experiment_id",
+            "hypothesis_class",
+        ),
+    )
+
+
+class DiagnosticCaseActivity(Base):
+    __tablename__ = "diagnostic_case_activities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    case_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_cases.id", ondelete="CASCADE"),
+        index=True,
+    )
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    activity_type: Mapped[str] = mapped_column(String(48), index=True)
+    actor: Mapped[str] = mapped_column(String(64), default="operator")
+    from_value: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    to_value: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    note_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    __table_args__ = (
+        Index(
+            "ix_diagnostic_case_activity_case_created",
+            "case_id",
+            "created_at",
+        ),
+        Index(
+            "ix_diagnostic_case_activity_run_created",
+            "run_id",
+            "created_at",
+        ),
+    )
