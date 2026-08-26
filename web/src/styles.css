@@ -1478,3 +1478,521 @@ header { display:flex; justify-content:space-between; gap:30px; align-items:flex
 
 /* Phase 7.1 — Vehicle Operational Digital Twin */
 .vehicleTwinPanel{margin-top:10px;min-height:auto}.vehicleTwinPolicy{max-width:1120px;margin:8px 0 15px}.vehicleTwinMetrics{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.vehicleTwinMetric,.vehicleTwinCard{border:1px solid #20262c;border-radius:7px;background:#090c0f}.vehicleTwinMetric{padding:12px 13px}.vehicleTwinMetric span,.vehicleTwinMetric strong,.vehicleTwinMetric small{display:block}.vehicleTwinMetric span,.vehicleTwinCardTitle span{color:#606b76;font-size:8px;letter-spacing:.08em}.vehicleTwinMetric strong{margin-top:4px;color:#d1d7dd;font-size:20px;font-weight:540}.vehicleTwinMetric small{margin-top:2px;color:#535d67;font-size:8px}.vehicleTwinLayout{display:grid;grid-template-columns:.72fr 1.28fr;gap:10px;margin-top:10px}.vehicleTwinLowerGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.vehicleTwinCard{min-width:0;padding:15px}.vehicleTwinCardTitle{display:flex;align-items:flex-start;gap:8px;min-height:35px}.vehicleTwinCardTitle>svg{color:#73808c;flex:0 0 auto}.vehicleTwinCardTitle span,.vehicleTwinCardTitle b{display:block}.vehicleTwinCardTitle b{margin-top:3px;color:#c4cbd2;font-size:10px;font-weight:550}.vehicleTwinRows{max-height:570px;overflow:auto;margin-top:8px}.vehicleTwinRows button{width:100%;display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:9px 8px;border:0;border-top:1px solid #1a2026;background:transparent;color:#8e98a2;text-align:left;cursor:pointer}.vehicleTwinRows button.selected{background:#11161b;box-shadow:inset 2px 0 0 #657483}.vehicleTwinRows b,.vehicleTwinRows span,.vehicleTwinRows small{display:block}.vehicleTwinRows b{color:#c2c9d0;font-size:9px}.vehicleTwinRows span{margin-top:2px;color:#69747f;font-size:8px}.vehicleTwinRows small{margin-top:3px;color:#4e5862;font-size:8px}.vehicleTwinRows strong{color:#cbd2d9;font-size:14px}.vehicleTwinIdentity{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:9px 0}.vehicleTwinIdentity>div,.vehicleTwinCompareResult>div{padding:8px;border:1px solid #1d242a;border-radius:5px}.vehicleTwinIdentity span,.vehicleTwinIdentity b,.vehicleTwinCompareResult span,.vehicleTwinCompareResult b{display:block}.vehicleTwinIdentity span,.vehicleTwinCompareResult span{color:#56616c;font-size:7px}.vehicleTwinIdentity b,.vehicleTwinCompareResult b{margin-top:3px;color:#aeb7c0;font-size:9px}.vehicleTwinLayerGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.vehicleTwinLayer{min-height:82px;padding:10px;border:1px solid #20272d;border-radius:6px;background:#0c1014}.vehicleTwinLayer>div{display:flex;gap:5px;align-items:center;color:#65717c}.vehicleTwinLayer>div span{font-size:7px;letter-spacing:.08em}.vehicleTwinLayer>b{display:block;margin-top:10px;color:#c3cad1;font-size:10px}.vehicleTwinLayer>small{display:block;margin-top:4px;color:#59646e;font-size:7.5px;line-height:1.35}.vehicleTwinPresence{margin-top:8px;padding:10px;border:1px solid #1e252c;border-radius:6px}.vehicleTwinPresence>span{color:#5b6671;font-size:8px;text-transform:uppercase}.vehicleTwinPresence>b{margin-left:8px;color:#bdc5cd;font-size:10px}.vehicleTwinPresence>div{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.vehicleTwinPresence>div span{padding:4px 6px;border:1px solid #29323a;border-radius:999px;color:#7f8b96;font-size:7px}.vehicleTwinPresence small{display:block;margin-top:7px;color:#4e5963;font-size:7px}.vehicleTwinTimeline{max-height:430px;overflow:auto;margin-top:7px}.vehicleTwinTimeline>div{display:flex;gap:9px;padding:8px 2px;border-top:1px solid #192026}.twinTimelineDot{width:7px;height:7px;border-radius:999px;background:#65727e;margin-top:4px;flex:0 0 auto}.vehicleTwinTimeline b,.vehicleTwinTimeline span,.vehicleTwinTimeline small{display:block}.vehicleTwinTimeline b{color:#b9c1c8;font-size:9px}.vehicleTwinTimeline span{margin-top:2px;color:#626d77;font-size:7px}.vehicleTwinTimeline small{margin-top:3px;color:#515b65;font-size:7.5px}.vehicleTwinGraph{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:8px}.vehicleTwinGraph>div{padding:9px;min-height:56px;border:1px solid #273039;border-radius:5px}.vehicleTwinGraph>div.absent{opacity:.34}.vehicleTwinGraph span,.vehicleTwinGraph b{display:block}.vehicleTwinGraph span{color:#596571;font-size:7px}.vehicleTwinGraph b{margin-top:5px;color:#b8c0c8;font-size:9px}.vehicleTwinEdges{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.vehicleTwinEdges>span{padding:6px 7px;border:1px solid #20272d;border-radius:5px;color:#737f8a;font-size:7px}.vehicleTwinEdges small{display:block;margin-top:3px;color:#4f5963}.twinGraphPolicy{margin:9px 0 0;font-size:7.5px}.vehicleTwinEvidenceGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:9px}.vehicleTwinEvidenceGrid>div{padding:9px;border:1px solid #1e252b;border-radius:5px}.vehicleTwinEvidenceGrid span,.vehicleTwinEvidenceGrid b{display:block}.vehicleTwinEvidenceGrid span{color:#59646f;font-size:7px}.vehicleTwinEvidenceGrid b{margin-top:4px;color:#bdc5cc;font-size:11px}.vehicleTwinTruthBoundary{display:flex;gap:7px;margin-top:9px;padding:9px;border:1px solid #284233;border-radius:5px;color:#86aa91;font-size:7.5px}.vehicleTwinSnapshotControls,.vehicleTwinCompareControls{display:grid;grid-template-columns:1fr auto;gap:7px;margin-top:8px}.vehicleTwinSnapshotControls input,.vehicleTwinCompareControls select{height:32px;padding:0 8px;color:#b5bdc5;background:#0b0f12;border:1px solid #293139;border-radius:5px;font-size:8px}.vehicleTwinSnapshotControls button,.vehicleTwinCompareControls button{display:flex;align-items:center;gap:5px;padding:0 10px;color:#c1c8cf;background:#171c21;border:1px solid #323941;border-radius:5px;font-size:8px;cursor:pointer}.vehicleTwinCompareControls button:disabled{opacity:.4;cursor:not-allowed}.vehicleTwinSnapshotRows{max-height:140px;overflow:auto;margin-top:8px}.vehicleTwinSnapshotRows>div{padding:7px 0;border-top:1px solid #192026}.vehicleTwinSnapshotRows b,.vehicleTwinSnapshotRows span,.vehicleTwinSnapshotRows small{display:block}.vehicleTwinSnapshotRows b{color:#adb6be;font-size:8px}.vehicleTwinSnapshotRows span{margin-top:2px;color:#5b6670;font-size:7px}.vehicleTwinSnapshotRows small{margin-top:2px;color:#727d87;font-size:7px}.vehicleTwinCompare{border-top:1px solid #1c2329;margin-top:10px;padding-top:9px}.vehicleTwinCompareResult{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:8px}.vehicleTwinFooter{display:flex;gap:8px;margin-top:10px;padding:9px 11px;border:1px solid #20262c;border-radius:6px;color:#65717b;font-size:7.5px;line-height:1.5}@media(max-width:1180px){.vehicleTwinLayout,.vehicleTwinLowerGrid{grid-template-columns:1fr}.vehicleTwinMetrics{grid-template-columns:repeat(3,1fr)}}@media(max-width:760px){.vehicleTwinMetrics,.vehicleTwinLayerGrid,.vehicleTwinEvidenceGrid,.vehicleTwinCompareResult{grid-template-columns:repeat(2,1fr)}.vehicleTwinIdentity{grid-template-columns:repeat(2,1fr)}.vehicleTwinSnapshotControls,.vehicleTwinCompareControls{grid-template-columns:1fr}}
+
+
+/* =========================================================
+   Phases 7.2–7.5 — Fleet Intelligence & Planning
+   ========================================================= */
+
+.fleetPlanningPanel {
+  margin-top: 18px;
+}
+
+.fleetPlanningPolicy {
+  max-width: 1180px;
+  line-height: 1.55;
+}
+
+.fleetPlanningHeader {
+  display: grid;
+  grid-template-columns:
+    repeat(4, minmax(150px, 1fr))
+    auto;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.fleetPlanningHeader > div,
+.fleetPlanningMetric {
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.025);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.fleetPlanningHeader > div span,
+.fleetPlanningMetric span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.fleetPlanningHeader > div strong,
+.fleetPlanningMetric strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 21px;
+  line-height: 1.1;
+}
+
+.fleetPlanningHeader > div small,
+.fleetPlanningMetric small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fleetPlanningRefresh,
+.fleetChangeControls button,
+.capacityPlannerControls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0 14px;
+  background: rgba(255,255,255,.05);
+  color: inherit;
+  cursor: pointer;
+}
+
+.fleetPlanningRefresh:hover,
+.fleetChangeControls button:hover,
+.capacityPlannerControls button:hover {
+  background: rgba(255,255,255,.09);
+}
+
+.fleetPlanningRefresh:disabled,
+.fleetChangeControls button:disabled,
+.capacityPlannerControls button:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.fleetPlanningSpin {
+  animation: fleetPlanningSpin 1s linear infinite;
+}
+
+@keyframes fleetPlanningSpin {
+  to { transform: rotate(360deg); }
+}
+
+.fleetPlanningTabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 16px 0;
+}
+
+.fleetPlanningTabs button {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: rgba(255,255,255,.018);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .055em;
+  cursor: pointer;
+}
+
+.fleetPlanningTabs button:last-child {
+  border-right: 0;
+}
+
+.fleetPlanningTabs button.active {
+  background: rgba(255,255,255,.075);
+  color: inherit;
+}
+
+.fleetPlanningWorkspace {
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 15px;
+  background: rgba(0,0,0,.08);
+}
+
+.fleetPlanningWorkspaceTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.fleetPlanningWorkspaceTitle > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fleetPlanningWorkspaceTitle span {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .09em;
+}
+
+.fleetPlanningWorkspaceTitle b {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+}
+
+.fleetPlanningWorkspaceTitle select,
+.fleetChangeControls select,
+.capacityPlannerControls select,
+.capacityPlannerControls input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: inherit;
+  padding: 8px 10px;
+}
+
+.fleetPlanningMetricGrid {
+  display: grid;
+  grid-template-columns:
+    repeat(4, minmax(130px, 1fr));
+  gap: 9px;
+  margin: 12px 0 15px;
+}
+
+.fleetExposureTable {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.fleetExposureHeader,
+.fleetExposureRow {
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 1.6fr)
+    repeat(5, minmax(90px, .75fr));
+  gap: 8px;
+  align-items: center;
+}
+
+.fleetExposureHeader {
+  padding: 9px 12px;
+  background: rgba(255,255,255,.04);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.fleetExposureRow {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.fleetExposureRow > div b,
+.fleetExposureRow > div small {
+  display: block;
+}
+
+.fleetExposureRow > div small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.fleetExposureRow strong {
+  font-size: 12px;
+}
+
+.fleetPlanningInterpretation,
+.fleetPlanningBoundary {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.fleetPlanningInterpretation {
+  margin: 13px 2px 0;
+}
+
+.fleetPlanningBoundary {
+  margin-top: 13px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,.02);
+}
+
+.fleetChangeControls,
+.capacityPlannerControls {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.fleetChangeControls label,
+.capacityPlannerControls label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.fleetChangeControls label span,
+.capacityPlannerControls label span {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.fleetChangeArrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+
+.fleetTransitionGrid {
+  display: grid;
+  grid-template-columns:
+    repeat(auto-fit, minmax(135px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.fleetTransitionGrid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.fleetTransitionGrid span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.fleetChangeRows,
+.capacitySelectionRows,
+.policyEffectivenessRows {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.fleetChangeRows > div {
+  display: grid;
+  grid-template-columns:
+    minmax(175px, 1fr)
+    minmax(220px, 1.8fr)
+    100px
+    90px;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 11px;
+  border-top: 1px solid var(--border);
+}
+
+.fleetChangeRows > div:first-child,
+.capacitySelectionRows > div:first-child,
+.policyEffectivenessRows > div:first-child {
+  border-top: 0;
+}
+
+.fleetChangeRows > div > div:first-child b,
+.fleetChangeRows > div > div:first-child span {
+  display: block;
+}
+
+.fleetChangeRows > div > div:first-child span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.fleetChangeTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.fleetChangeTags span {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 6px;
+  font-size: 8px;
+  color: var(--muted);
+}
+
+.capacityPlannerControls input {
+  width: 150px;
+}
+
+.capacityPlannerControls button {
+  min-height: 35px;
+}
+
+.capacitySelectionRows > div {
+  display: grid;
+  grid-template-columns:
+    32px
+    minmax(170px, 1.5fr)
+    minmax(120px, 1fr)
+    90px
+    90px
+    70px;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 11px;
+  border-top: 1px solid var(--border);
+}
+
+.capacityRank {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.capacitySelectionRows > div > div b,
+.capacitySelectionRows > div > div span {
+  display: block;
+}
+
+.capacitySelectionRows > div > div span,
+.capacitySelectionRows small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.policyEffectivenessRows > div {
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 1.7fr)
+    repeat(7, minmax(80px, .65fr));
+  gap: 8px;
+  align-items: center;
+  padding: 10px 11px;
+  border-top: 1px solid var(--border);
+}
+
+.policyIdentity b,
+.policyIdentity small {
+  display: block;
+}
+
+.policyIdentity b {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.policyIdentity small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.policyEnabled,
+.policyDisabled {
+  display: inline-flex !important;
+  width: fit-content;
+  border-radius: 20px;
+  padding: 2px 6px;
+  font-size: 7px !important;
+  font-weight: 800;
+  letter-spacing: .07em;
+}
+
+.policyEnabled {
+  border: 1px solid rgba(75, 190, 125, .45);
+}
+
+.policyDisabled {
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.policyEffectivenessFact span,
+.policyEffectivenessFact b {
+  display: block;
+}
+
+.policyEffectivenessFact span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.policyEffectivenessFact b {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.fleetPlanningEmpty {
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+  padding: 18px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 11px;
+}
+
+@media (max-width: 1100px) {
+  .fleetPlanningHeader {
+    grid-template-columns:
+      repeat(2, minmax(150px, 1fr));
+  }
+
+  .fleetPlanningMetricGrid {
+    grid-template-columns:
+      repeat(2, minmax(130px, 1fr));
+  }
+
+  .fleetPlanningTabs {
+    grid-template-columns:
+      repeat(2, 1fr);
+  }
+
+  .fleetExposureTable,
+  .fleetChangeRows,
+  .capacitySelectionRows,
+  .policyEffectivenessRows {
+    overflow-x: auto;
+  }
+
+  .fleetExposureHeader,
+  .fleetExposureRow {
+    min-width: 780px;
+  }
+
+  .fleetChangeRows > div {
+    min-width: 760px;
+  }
+
+  .capacitySelectionRows > div {
+    min-width: 760px;
+  }
+
+  .policyEffectivenessRows > div {
+    min-width: 1050px;
+  }
+}
