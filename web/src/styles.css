@@ -1060,3 +1060,123 @@ header { display:flex; justify-content:space-between; gap:30px; align-items:flex
   .maintenanceComposer .wide,
   .maintenanceComposer > button { grid-column:auto; }
 }
+
+/* Phase 6.13 — Operational Automation */
+.automationPanel { margin-top:10px; min-height:auto; }
+.automationGuardBadge { color:#d9c58f; border-color:#554a31; background:#17140d; }
+.automationPolicyText { max-width:1080px; margin:12px 0 18px; }
+.automationMetrics { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:14px 0 8px; }
+.automationMetric { background:#101216; border:1px solid #21262d; border-radius:7px; padding:14px; }
+.automationMetric span,.automationMetric small { display:block; color:#65707c; }
+.automationMetric span { font-size:9px; text-transform:uppercase; letter-spacing:.1em; }
+.automationMetric strong { display:block; margin:5px 0 2px; font-size:25px; font-weight:530; letter-spacing:-.035em; }
+.automationMetric small { font-size:8px; }
+.automationStatusStrip { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid #20252b; border-radius:7px; overflow:hidden; margin-bottom:10px; }
+.automationStatusStrip>div { padding:10px 13px; background:#0d0f12; border-right:1px solid #20252b; display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.automationStatusStrip>div:last-child { border-right:0; }
+.automationStatusStrip span { color:#68727e; font-size:8px; text-transform:uppercase; letter-spacing:.1em; }
+.automationStatusStrip strong { font-size:15px; font-weight:530; }
+.automationGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+.automationGrid.lower { grid-template-columns:.9fr 1.1fr; }
+.automationCard { border:1px solid #20252b; background:#0b0d10; border-radius:7px; padding:17px; min-height:250px; }
+.automationCardTitle { display:flex; gap:10px; align-items:flex-start; margin-bottom:14px; color:#8b949f; }
+.automationCardTitle svg { margin-top:1px; flex:0 0 auto; }
+.automationCardTitle span,.automationCardTitle b { display:block; }
+.automationCardTitle span { color:#626c77; font-size:8px; letter-spacing:.12em; }
+.automationCardTitle b { color:#c5cbd2; font-size:11px; font-weight:530; margin-top:3px; }
+.automationPolicyList { display:grid; gap:7px; }
+.automationPolicyRow { border:1px solid #1e2329; background:#0f1114; border-radius:6px; padding:12px; display:grid; grid-template-columns:1fr auto; gap:14px; align-items:center; }
+.automationPolicyRow span,.automationPolicyRow small,.automationPolicyRow code { display:block; }
+.automationPolicyName { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:4px; }
+.automationPolicyName b { font-size:11px; font-weight:540; }
+.automationPolicyRow>div>span { color:#7b8591; font-size:9px; }
+.automationPolicyRow small { color:#59636e; font-size:8px; line-height:1.45; margin:5px 0; max-width:620px; }
+.automationPolicyRow code { color:#59616b; font-size:8px; }
+.automationSeverity { border:1px solid #313842; border-radius:999px; padding:3px 6px; font-size:7px!important; letter-spacing:.08em; }
+.automationSeverity.severity-high { color:#dfa5a0!important; border-color:#633a39; background:#1b1111; }
+.automationSeverity.severity-medium { color:#d6bd83!important; border-color:#594b2f; background:#17140d; }
+.automationToggle { border:1px solid #313740; background:#111419; color:#707985; border-radius:999px; padding:6px 9px; font-size:8px; cursor:pointer; }
+.automationToggle.enabled { color:#a8d9b8; border-color:#365543; background:#0e1712; }
+.automationToggle:disabled { opacity:.45; cursor:not-allowed; }
+.automationSimulationHero { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:end; padding:14px; border:1px solid #20252b; background:#101216; border-radius:6px; }
+.automationSimulationHero span,.automationSimulationHero small { display:block; color:#66717d; }
+.automationSimulationHero span { font-size:9px; }
+.automationSimulationHero strong { display:block; font-size:35px; line-height:1; letter-spacing:-.05em; margin:4px 0; }
+.automationSimulationHero small { font-size:8px; }
+.automationSimulationHero button,.automationActionButtons button { border:1px solid #303740; background:#111419; color:#87909b; border-radius:6px; padding:8px 10px; font-size:9px; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; }
+.automationSimulationHero button.primary,.automationActionButtons button.primary { color:#e1e5e9; border-color:#4b525c; background:#1b1f24; }
+.automationSimulationHero button:disabled,.automationActionButtons button:disabled { opacity:.38; cursor:not-allowed; }
+.automationPolicyMatchGrid { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:8px; }
+.automationPolicyMatchGrid>div { border:1px solid #1e2329; border-radius:6px; padding:11px; background:#0f1114; }
+.automationPolicyMatchGrid span,.automationPolicyMatchGrid small { display:block; color:#606a75; }
+.automationPolicyMatchGrid span { font-size:8px; word-break:break-word; }
+.automationPolicyMatchGrid strong { display:block; font-size:20px; margin:5px 0 2px; }
+.automationPolicyMatchGrid small { font-size:7px; text-transform:uppercase; }
+.automationDryRunNote { margin:11px 0 0; }
+.automationQueueCard,.automationDetailCard { min-height:510px; }
+.automationCardTitle.queueTitle { display:grid; grid-template-columns:auto 1fr auto; }
+.automationCardTitle select { border:1px solid #2a3037; background:#101216; color:#89929d; border-radius:5px; padding:6px 8px; font-size:9px; }
+.automationActionList { max-height:430px; overflow:auto; display:grid; gap:5px; padding-right:3px; }
+.automationActionList>button { border:1px solid #1f242a; background:#0f1114; color:#c3c9d0; border-radius:6px; padding:10px; display:grid; grid-template-columns:7px 1fr auto; gap:10px; align-items:center; text-align:left; cursor:pointer; }
+.automationActionList>button:hover,.automationActionList>button.selected { background:#14171b; border-color:#353c45; }
+.automationActionList>button>div:nth-child(2) b,.automationActionList>button>div:nth-child(2) span,.automationActionList>button>div:nth-child(2) small { display:block; }
+.automationActionList>button>div:nth-child(2) b { font-size:10px; }
+.automationActionList>button>div:nth-child(2) span { color:#7d8792; font-size:9px; margin:2px 0; }
+.automationActionList>button>div:nth-child(2) small { color:#59636e; font-size:8px; }
+.automationActionList>button>div:last-child { text-align:right; }
+.automationActionList>button>div:last-child strong,.automationActionList>button>div:last-child span { display:block; }
+.automationActionList>button>div:last-child strong { font-size:8px; color:#9ba4ae; }
+.automationActionList>button>div:last-child span { color:#646e79; font-size:8px; margin-top:3px; }
+.automationStatusDot { width:6px; height:6px; border-radius:50%; background:#69717c; }
+.automationStatusDot.status-pending_approval { background:#b18f4d; }
+.automationStatusDot.status-approved { background:#7d9ab5; }
+.automationStatusDot.status-executed { background:#69a37a; }
+.automationStatusDot.status-rejected { background:#9c5757; }
+.automationEmpty { color:#626c77; font-size:10px; line-height:1.55; padding:24px 6px; }
+.automationActionHero { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+.automationActionHero>div { border:1px solid #20252b; background:#101216; border-radius:6px; padding:11px; }
+.automationActionHero span,.automationActionHero strong { display:block; }
+.automationActionHero span { color:#65707c; font-size:8px; text-transform:uppercase; }
+.automationActionHero strong { font-size:12px; margin-top:4px; }
+.automationReason { color:#858e99; font-size:9px; line-height:1.55; background:#111419; border:1px solid #222830; border-radius:6px; padding:11px; margin:8px 0; }
+.automationSnapshotGrid { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; }
+.automationStat { border:1px solid #1e2329; background:#0f1114; border-radius:5px; padding:9px; min-width:0; }
+.automationStat span,.automationStat b { display:block; }
+.automationStat span { color:#5f6974; font-size:7px; text-transform:uppercase; letter-spacing:.08em; }
+.automationStat b { color:#b3bbc4; font-size:10px; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.automationActionButtons { display:grid; grid-template-columns:1fr 1fr 1.35fr; gap:7px; margin:10px 0; }
+.automationExecutionGuard { border:1px solid #3a422e; background:#14170e; color:#aab693; border-radius:6px; padding:11px; display:flex; gap:9px; align-items:flex-start; font-size:9px; line-height:1.5; }
+.automationExecutionGuard svg { flex:0 0 auto; margin-top:1px; }
+.automationExecutionResult { margin-top:8px; border:1px solid #20252b; border-radius:6px; padding:10px; background:#101216; }
+.automationExecutionResult span,.automationExecutionResult code { display:block; }
+.automationExecutionResult span { color:#65707c; font-size:8px; text-transform:uppercase; }
+.automationExecutionResult code { color:#a8b0b9; font-size:8px; margin-top:5px; white-space:pre-wrap; word-break:break-word; }
+.automationAuditCard { margin-top:10px; min-height:auto; }
+.automationAuditList { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; }
+.automationAuditList>div { border:1px solid #1f242a; background:#0f1114; border-radius:6px; padding:10px; min-width:0; }
+.automationAuditList span,.automationAuditList b,.automationAuditList small { display:block; }
+.automationAuditList span { color:#78828e; font-size:8px; text-transform:uppercase; }
+.automationAuditList b { font-size:10px; margin:4px 0 2px; }
+.automationAuditList small { color:#59636e; font-size:8px; }
+.automationAuditList p { color:#737d88; font-size:8px; line-height:1.45; margin:6px 0 0; }
+.automationSafetyFooter { margin-top:10px; display:flex; align-items:flex-start; gap:9px; border-top:1px solid #1e2329; padding-top:13px; color:#69737e; font-size:9px; line-height:1.5; }
+.automationSafetyFooter svg { flex:0 0 auto; margin-top:1px; }
+
+@media(max-width:1180px){
+  .automationGrid,.automationGrid.lower{grid-template-columns:1fr}
+  .automationQueueCard,.automationDetailCard{min-height:auto}
+}
+@media(max-width:900px){
+  .automationMetrics,.automationStatusStrip{grid-template-columns:repeat(2,1fr)}
+  .automationStatusStrip>div:nth-child(2){border-right:0}
+  .automationPolicyMatchGrid,.automationAuditList{grid-template-columns:1fr 1fr}
+  .automationSnapshotGrid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:650px){
+  .automationMetrics,.automationStatusStrip,.automationPolicyMatchGrid,.automationAuditList,.automationSnapshotGrid,.automationActionHero,.automationActionButtons{grid-template-columns:1fr}
+  .automationSimulationHero{grid-template-columns:1fr}
+  .automationPolicyRow{grid-template-columns:1fr}
+  .automationToggle{justify-self:start}
+  .automationCardTitle.queueTitle{grid-template-columns:auto 1fr}
+  .automationCardTitle select{grid-column:1 / -1}
+}

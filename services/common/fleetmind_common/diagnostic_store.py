@@ -503,3 +503,149 @@ class DiagnosticMaintenanceActivity(Base):
             "created_at",
         ),
     )
+
+class DiagnosticAutomationPolicy(Base):
+    __tablename__ = "diagnostic_automation_policies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    rules_version: Mapped[str] = mapped_column(String(64), index=True)
+    policy_key: Mapped[str] = mapped_column(String(80), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    severity: Mapped[str] = mapped_column(String(16), index=True)
+    conditions_json: Mapped[str] = mapped_column(Text, default="[]")
+    action_type: Mapped[str] = mapped_column(String(48), index=True)
+    action_payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    requires_approval: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "policy_key",
+            name="uq_diagnostic_automation_policy_run_key",
+        ),
+        Index(
+            "ix_diagnostic_automation_policy_run_enabled_priority",
+            "run_id",
+            "enabled",
+            "priority",
+        ),
+    )
+
+
+class DiagnosticAutomationAction(Base):
+    __tablename__ = "diagnostic_automation_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    policy_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_automation_policies.id", ondelete="CASCADE"),
+        index=True,
+    )
+    policy_key: Mapped[str] = mapped_column(String(80), index=True)
+    case_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_cases.id", ondelete="CASCADE"),
+        index=True,
+    )
+    vehicle_id: Mapped[str] = mapped_column(String(32), index=True)
+    rules_version: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    severity: Mapped[str] = mapped_column(String(16), index=True)
+    action_type: Mapped[str] = mapped_column(String(48), index=True)
+    reason: Mapped[str] = mapped_column(Text)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    source_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    approved_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    rejected_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    executed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    execution_result_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "case_id",
+            "policy_key",
+            name="uq_diagnostic_automation_action_run_case_policy",
+        ),
+        Index(
+            "ix_diagnostic_automation_action_run_status_created",
+            "run_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_diagnostic_automation_action_run_vehicle",
+            "run_id",
+            "vehicle_id",
+        ),
+    )
+
+
+class DiagnosticAutomationActivity(Base):
+    __tablename__ = "diagnostic_automation_activities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    action_id: Mapped[int | None] = mapped_column(
+        ForeignKey("diagnostic_automation_actions.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    policy_id: Mapped[int | None] = mapped_column(
+        ForeignKey("diagnostic_automation_policies.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("diagnostic_model_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    case_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    vehicle_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    activity_type: Mapped[str] = mapped_column(String(48), index=True)
+    actor: Mapped[str] = mapped_column(String(64), default="operator")
+    note_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    __table_args__ = (
+        Index(
+            "ix_diagnostic_automation_activity_action_created",
+            "action_id",
+            "created_at",
+        ),
+        Index(
+            "ix_diagnostic_automation_activity_policy_created",
+            "policy_id",
+            "created_at",
+        ),
+        Index(
+            "ix_diagnostic_automation_activity_run_created",
+            "run_id",
+            "created_at",
+        ),
+    )

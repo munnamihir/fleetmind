@@ -12,6 +12,26 @@ from fleetmind_common.db import SessionLocal
 from fleetmind_common.diagnostic_event_rules import (
     DIAGNOSTIC_EVENT_TYPES,
 )
+from fleetmind_common.diagnostic_automation_rules import (
+    AUTOMATION_ACTION_ENSURE_REVIEW_PLAN,
+    AUTOMATION_ACTION_ENSURE_WATCHLIST,
+    AUTOMATION_ACTION_STATUSES,
+    AUTOMATION_ACTIVITY_ACTION_APPROVED,
+    AUTOMATION_ACTIVITY_ACTION_CREATED,
+    AUTOMATION_ACTIVITY_ACTION_EXECUTED,
+    AUTOMATION_ACTIVITY_ACTION_REJECTED,
+    AUTOMATION_ACTIVITY_POLICY_CREATED,
+    AUTOMATION_ACTIVITY_POLICY_DISABLED,
+    AUTOMATION_ACTIVITY_POLICY_ENABLED,
+    AUTOMATION_RULES_VERSION,
+    AUTOMATION_STATUS_APPROVED,
+    AUTOMATION_STATUS_EXECUTED,
+    AUTOMATION_STATUS_PENDING_APPROVAL,
+    AUTOMATION_STATUS_REJECTED,
+    DEFAULT_AUTOMATION_POLICIES,
+    policy_match_reason,
+    policy_matches,
+)
 from fleetmind_common.diagnostic_prognostic_rules import (
     FIT_WINDOW_POINTS,
     MAINTENANCE_ACTIVITY_CREATED,
@@ -48,6 +68,9 @@ from fleetmind_common.diagnostic_episode_rules import (
     DIAGNOSTIC_EPISODE_STATES,
 )
 from fleetmind_common.diagnostic_store import (
+    DiagnosticAutomationAction,
+    DiagnosticAutomationActivity,
+    DiagnosticAutomationPolicy,
     DiagnosticCase,
     DiagnosticCaseActivity,
     DiagnosticInvestigationView,
@@ -3167,6 +3190,1074 @@ def upsert_diagnostic_maintenance_plan(
             "Maintenance plans are operator workflow metadata. Creating or "
             "updating a plan does not rewrite diagnostic replay, events, "
             "episodes, cases, model artifacts, or benchmark evidence."
+        ),
+    }
+
+
+
+
+class DiagnosticAutomationActorRequest(BaseModel):
+    actor: str = Field(default="operator", min_length=1, max_length=64)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class DiagnosticAutomationPolicyUpdate(BaseModel):
+    enabled: bool
+    actor: str = Field(default="operator", min_length=1, max_length=64)
+
+
+def _automation_policy_payload(row: DiagnosticAutomationPolicy) -> dict:
+    return {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "rulesVersion": row.rules_version,
+        "policyKey": row.policy_key,
+        "name": row.name,
+        "description": row.description,
+        "enabled": bool(row.enabled),
+        "priority": int(row.priority),
+        "severity": row.severity,
+        "conditions": _json_list(row.conditions_json),
+        "actionType": row.action_type,
+        "actionPayload": _json_object(row.action_payload_json),
+        "requiresApproval": bool(row.requires_approval),
+        "createdAt": row.created_at.isoformat(),
+        "updatedAt": row.updated_at.isoformat(),
+    }
+
+
+def _automation_action_payload(row: DiagnosticAutomationAction) -> dict:
+    return {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "policyId": row.policy_id,
+        "policyKey": row.policy_key,
+        "caseId": row.case_id,
+        "vehicleId": row.vehicle_id,
+        "rulesVersion": row.rules_version,
+        "createdAt": row.created_at.isoformat(),
+        "updatedAt": row.updated_at.isoformat(),
+        "status": row.status,
+        "severity": row.severity,
+        "actionType": row.action_type,
+        "reason": row.reason,
+        "payload": _json_object(row.payload_json),
+        "sourceSnapshot": _json_object(row.source_snapshot_json),
+        "approvedAt": (
+            row.approved_at.isoformat()
+            if row.approved_at is not None
+            else None
+        ),
+        "approvedBy": row.approved_by,
+        "rejectedAt": (
+            row.rejected_at.isoformat()
+            if row.rejected_at is not None
+            else None
+        ),
+        "rejectedBy": row.rejected_by,
+        "executedAt": (
+            row.executed_at.isoformat()
+            if row.executed_at is not None
+            else None
+        ),
+        "executedBy": row.executed_by,
+        "executionResult": _json_object(row.execution_result_json),
+    }
+
+
+def _automation_activity_payload(row: DiagnosticAutomationActivity) -> dict:
+    return {
+        "id": row.id,
+        "actionId": row.action_id,
+        "policyId": row.policy_id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "caseId": row.case_id,
+        "vehicleId": row.vehicle_id,
+        "createdAt": row.created_at.isoformat(),
+        "activityType": row.activity_type,
+        "actor": row.actor,
+        "note": row.note_text,
+        "details": _json_object(row.details_json),
+    }
+
+
+def _automation_policy_spec(row: DiagnosticAutomationPolicy) -> dict:
+    return {
+        "id": row.id,
+        "key": row.policy_key,
+        "name": row.name,
+        "description": row.description,
+        "enabled": bool(row.enabled),
+        "priority": int(row.priority),
+        "severity": row.severity,
+        "conditions": _json_list(row.conditions_json),
+        "actionType": row.action_type,
+        "actionPayload": _json_object(row.action_payload_json),
+        "requiresApproval": bool(row.requires_approval),
+    }
+
+
+def _automation_source_snapshot(record: dict) -> dict:
+    fit = record.get("fit") or {}
+    horizon = record.get("experimentalHorizon") or {}
+    return {
+        "caseId": record.get("caseId"),
+        "episodeId": record.get("episodeId"),
+        "vehicleId": record.get("vehicleId"),
+        "hypothesisClass": record.get("hypothesisClass"),
+        "caseStatus": record.get("caseStatus"),
+        "reviewPriority": record.get("reviewPriority"),
+        "episodeState": record.get("episodeState"),
+        "watchlisted": bool(record.get("watchlisted")),
+        "trajectoryEligible": bool(record.get("trajectoryEligible")),
+        "trajectoryPointCount": int(record.get("trajectoryPointCount") or 0),
+        "latestConfidence": fit.get("latestConfidence"),
+        "slopePer1kMiles": fit.get("slopePer1kMiles"),
+        "priorityScore": record.get("priorityScore"),
+        "maintenanceTier": record.get("maintenanceTier"),
+        "recommendedReviewWindow": record.get("recommendedReviewWindow"),
+        "maintenancePlanPresent": record.get("maintenancePlan") is not None,
+        "thresholdAlreadyReached": bool(
+            horizon.get("thresholdAlreadyReached", False)
+        ),
+        "estimatedMilesToThreshold": horizon.get(
+            "estimatedMilesToThreshold"
+        ),
+    }
+
+
+def _current_automation_policies(
+    db: Session,
+    *,
+    run_id: int,
+    experiment_id: str,
+) -> list[DiagnosticAutomationPolicy]:
+    return db.execute(
+        select(DiagnosticAutomationPolicy)
+        .where(
+            DiagnosticAutomationPolicy.run_id == run_id,
+            DiagnosticAutomationPolicy.experiment_id == experiment_id,
+        )
+        .order_by(
+            desc(DiagnosticAutomationPolicy.priority),
+            DiagnosticAutomationPolicy.policy_key,
+        )
+    ).scalars().all()
+
+
+def _require_automation_policy(
+    policy_key: str,
+    db: Session,
+) -> tuple[str, DiagnosticModelRun, DiagnosticAutomationPolicy]:
+    experiment_id, run = _require_current_run(db)
+    row = db.execute(
+        select(DiagnosticAutomationPolicy)
+        .where(
+            DiagnosticAutomationPolicy.run_id == run.id,
+            DiagnosticAutomationPolicy.experiment_id == experiment_id,
+            DiagnosticAutomationPolicy.policy_key == policy_key,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Automation policy not found in the current run",
+        )
+    return experiment_id, run, row
+
+
+def _require_automation_action(
+    action_id: int,
+    db: Session,
+) -> tuple[str, DiagnosticModelRun, DiagnosticAutomationAction]:
+    experiment_id, run = _require_current_run(db)
+    row = db.execute(
+        select(DiagnosticAutomationAction)
+        .where(
+            DiagnosticAutomationAction.id == action_id,
+            DiagnosticAutomationAction.run_id == run.id,
+            DiagnosticAutomationAction.experiment_id == experiment_id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Automation action not found in the current run",
+        )
+    return experiment_id, run, row
+
+
+def _automation_matches(
+    records: list[dict],
+    policies: list[DiagnosticAutomationPolicy],
+    *,
+    include_disabled: bool = False,
+) -> list[dict]:
+    matches = []
+    for policy_row in policies:
+        policy = _automation_policy_spec(policy_row)
+        if not include_disabled and not policy["enabled"]:
+            continue
+        for record in records:
+            if record.get("caseStatus") == CASE_CLOSED:
+                continue
+            if not policy_matches(record, policy):
+                continue
+            matches.append(
+                {
+                    "policy": policy,
+                    "record": record,
+                    "reason": policy_match_reason(record, policy),
+                }
+            )
+    matches.sort(
+        key=lambda item: (
+            int(item["policy"]["priority"]),
+            float(item["record"].get("priorityScore") or 0.0),
+            -int(item["record"]["caseId"]),
+        ),
+        reverse=True,
+    )
+    return matches
+
+
+def _automation_scope_policy() -> dict:
+    return {
+        "currentRunOnly": True,
+        "exactExperimentOnly": True,
+        "runFrozenPrognosticInputs": True,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "automaticExecution": False,
+        "humanApprovalRequiredForDefaultPolicies": True,
+        "workflowMetadataOnly": True,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+    }
+
+
+@router.post("/automation/policies/bootstrap")
+def bootstrap_diagnostic_automation_policies(
+    request: DiagnosticAutomationActorRequest,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    existing_rows = _current_automation_policies(
+        db,
+        run_id=run.id,
+        experiment_id=experiment_id,
+    )
+    existing = {row.policy_key: row for row in existing_rows}
+    now = datetime.now(timezone.utc)
+    created = 0
+
+    for spec in DEFAULT_AUTOMATION_POLICIES:
+        if spec["key"] in existing:
+            continue
+        row = DiagnosticAutomationPolicy(
+            run_id=run.id,
+            experiment_id=experiment_id,
+            rules_version=AUTOMATION_RULES_VERSION,
+            policy_key=spec["key"],
+            name=spec["name"],
+            description=spec["description"],
+            enabled=True,
+            priority=int(spec["priority"]),
+            severity=spec["severity"],
+            conditions_json=json.dumps(spec["conditions"], sort_keys=True),
+            action_type=spec["actionType"],
+            action_payload_json=json.dumps(
+                spec.get("actionPayload") or {},
+                sort_keys=True,
+            ),
+            requires_approval=bool(spec["requiresApproval"]),
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+        db.flush()
+        db.add(
+            DiagnosticAutomationActivity(
+                action_id=None,
+                policy_id=row.id,
+                run_id=run.id,
+                experiment_id=experiment_id,
+                case_id=None,
+                vehicle_id=None,
+                created_at=now,
+                activity_type=AUTOMATION_ACTIVITY_POLICY_CREATED,
+                actor=request.actor,
+                note_text=(
+                    "Pinned Phase 6.13 deterministic automation policy."
+                ),
+                details_json=json.dumps(
+                    {
+                        "policyKey": row.policy_key,
+                        "rulesVersion": AUTOMATION_RULES_VERSION,
+                    },
+                    sort_keys=True,
+                ),
+            )
+        )
+        created += 1
+
+    db.commit()
+    rows = _current_automation_policies(
+        db,
+        run_id=run.id,
+        experiment_id=experiment_id,
+    )
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": AUTOMATION_RULES_VERSION,
+        "created": created,
+        "totalPolicies": len(rows),
+        "policies": [_automation_policy_payload(row) for row in rows],
+        "scopePolicy": _automation_scope_policy(),
+        "interpretationPolicy": (
+            "Bootstrapping persists source-declared deterministic policies for "
+            "the current diagnostic run. It does not evaluate, approve, or "
+            "execute any operational action."
+        ),
+    }
+
+
+@router.get("/automation/policies")
+def diagnostic_automation_policies(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    rows = _current_automation_policies(
+        db,
+        run_id=run.id,
+        experiment_id=experiment_id,
+    )
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": AUTOMATION_RULES_VERSION,
+        "totalPolicies": len(rows),
+        "enabledPolicies": sum(1 for row in rows if row.enabled),
+        "policies": [_automation_policy_payload(row) for row in rows],
+        "scopePolicy": _automation_scope_policy(),
+    }
+
+
+@router.put("/automation/policies/{policy_key}")
+def update_diagnostic_automation_policy(
+    policy_key: str,
+    request: DiagnosticAutomationPolicyUpdate,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, row = _require_automation_policy(policy_key, db)
+    previous = bool(row.enabled)
+    row.enabled = bool(request.enabled)
+    row.updated_at = datetime.now(timezone.utc)
+
+    if previous != row.enabled:
+        db.add(
+            DiagnosticAutomationActivity(
+                action_id=None,
+                policy_id=row.id,
+                run_id=run.id,
+                experiment_id=experiment_id,
+                case_id=None,
+                vehicle_id=None,
+                created_at=row.updated_at,
+                activity_type=(
+                    AUTOMATION_ACTIVITY_POLICY_ENABLED
+                    if row.enabled
+                    else AUTOMATION_ACTIVITY_POLICY_DISABLED
+                ),
+                actor=request.actor,
+                note_text=None,
+                details_json=json.dumps(
+                    {
+                        "fromEnabled": previous,
+                        "toEnabled": bool(row.enabled),
+                    },
+                    sort_keys=True,
+                ),
+            )
+        )
+
+    db.commit()
+    db.refresh(row)
+    return {
+        "policy": _automation_policy_payload(row),
+        "interpretationPolicy": (
+            "Only policy enablement is operator-configurable in Phase 6.13. "
+            "Conditions and action semantics remain source-declared and "
+            "version-pinned to prevent post-result threshold tuning."
+        ),
+    }
+
+
+@router.get("/automation/simulate")
+def simulate_diagnostic_automation(
+    include_disabled: bool = Query(default=False),
+    limit: int = Query(default=30, ge=1, le=200),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_prognostic_records(db)
+    policies = _current_automation_policies(
+        db,
+        run_id=run.id,
+        experiment_id=experiment_id,
+    )
+    matches = _automation_matches(
+        records,
+        policies,
+        include_disabled=include_disabled,
+    )
+
+    by_policy = []
+    for policy in policies:
+        count = sum(
+            1
+            for item in matches
+            if item["policy"]["key"] == policy.policy_key
+        )
+        by_policy.append(
+            {
+                "policyKey": policy.policy_key,
+                "enabled": bool(policy.enabled),
+                "matches": count,
+                "actionType": policy.action_type,
+                "severity": policy.severity,
+            }
+        )
+
+    action_types = sorted({item["policy"]["actionType"] for item in matches})
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": AUTOMATION_RULES_VERSION,
+        "simulationOnly": True,
+        "wouldQueue": len(matches),
+        "byPolicy": by_policy,
+        "byActionType": [
+            {
+                "actionType": action_type,
+                "matches": sum(
+                    1
+                    for item in matches
+                    if item["policy"]["actionType"] == action_type
+                ),
+            }
+            for action_type in action_types
+        ],
+        "sampleMatches": [
+            {
+                "policyKey": item["policy"]["key"],
+                "policyName": item["policy"]["name"],
+                "severity": item["policy"]["severity"],
+                "actionType": item["policy"]["actionType"],
+                "requiresApproval": item["policy"]["requiresApproval"],
+                "caseId": item["record"]["caseId"],
+                "vehicleId": item["record"]["vehicleId"],
+                "hypothesisClass": item["record"]["hypothesisClass"],
+                "maintenanceTier": item["record"]["maintenanceTier"],
+                "priorityScore": item["record"]["priorityScore"],
+                "reason": item["reason"],
+            }
+            for item in matches[:limit]
+        ],
+        "scopePolicy": _automation_scope_policy(),
+        "interpretationPolicy": (
+            "Dry-run simulation evaluates deterministic policies against "
+            "current run-frozen prognostic workflow inputs. It writes no "
+            "actions and performs no operational execution."
+        ),
+    }
+
+
+@router.post("/automation/evaluate")
+def evaluate_diagnostic_automation(
+    request: DiagnosticAutomationActorRequest,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = _current_prognostic_records(db)
+    policies = _current_automation_policies(
+        db,
+        run_id=run.id,
+        experiment_id=experiment_id,
+    )
+    if not policies:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No persisted automation policies exist for the current run; "
+                "bootstrap policies first"
+            ),
+        )
+
+    matches = _automation_matches(records, policies)
+    existing_rows = db.execute(
+        select(DiagnosticAutomationAction).where(
+            DiagnosticAutomationAction.run_id == run.id,
+            DiagnosticAutomationAction.experiment_id == experiment_id,
+        )
+    ).scalars().all()
+    existing_keys = {
+        (row.case_id, row.policy_key)
+        for row in existing_rows
+    }
+    now = datetime.now(timezone.utc)
+    created = 0
+    skipped_existing = 0
+
+    policy_by_key = {row.policy_key: row for row in policies}
+    for item in matches:
+        policy = item["policy"]
+        record = item["record"]
+        key = (int(record["caseId"]), str(policy["key"]))
+        if key in existing_keys:
+            skipped_existing += 1
+            continue
+
+        policy_row = policy_by_key[policy["key"]]
+        action = DiagnosticAutomationAction(
+            run_id=run.id,
+            experiment_id=experiment_id,
+            policy_id=policy_row.id,
+            policy_key=policy_row.policy_key,
+            case_id=int(record["caseId"]),
+            vehicle_id=str(record["vehicleId"]),
+            rules_version=AUTOMATION_RULES_VERSION,
+            created_at=now,
+            updated_at=now,
+            status=AUTOMATION_STATUS_PENDING_APPROVAL,
+            severity=policy_row.severity,
+            action_type=policy_row.action_type,
+            reason=item["reason"],
+            payload_json=json.dumps(
+                policy.get("actionPayload") or {},
+                sort_keys=True,
+            ),
+            source_snapshot_json=json.dumps(
+                _automation_source_snapshot(record),
+                sort_keys=True,
+            ),
+            approved_at=None,
+            approved_by=None,
+            rejected_at=None,
+            rejected_by=None,
+            executed_at=None,
+            executed_by=None,
+            execution_result_json="{}",
+        )
+        db.add(action)
+        db.flush()
+        db.add(
+            DiagnosticAutomationActivity(
+                action_id=action.id,
+                policy_id=policy_row.id,
+                run_id=run.id,
+                experiment_id=experiment_id,
+                case_id=action.case_id,
+                vehicle_id=action.vehicle_id,
+                created_at=now,
+                activity_type=AUTOMATION_ACTIVITY_ACTION_CREATED,
+                actor=request.actor,
+                note_text=request.note,
+                details_json=json.dumps(
+                    {
+                        "status": AUTOMATION_STATUS_PENDING_APPROVAL,
+                        "actionType": action.action_type,
+                        "policyKey": action.policy_key,
+                    },
+                    sort_keys=True,
+                ),
+            )
+        )
+        existing_keys.add(key)
+        created += 1
+
+    db.commit()
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": AUTOMATION_RULES_VERSION,
+        "matched": len(matches),
+        "created": created,
+        "skippedExisting": skipped_existing,
+        "executionPerformed": False,
+        "scopePolicy": _automation_scope_policy(),
+        "interpretationPolicy": (
+            "Evaluation materializes approval-pending workflow actions only. "
+            "No action is automatically approved or executed."
+        ),
+    }
+
+
+@router.get("/automation/summary")
+def diagnostic_automation_summary(
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    policies = _current_automation_policies(
+        db,
+        run_id=run.id,
+        experiment_id=experiment_id,
+    )
+    actions = db.execute(
+        select(DiagnosticAutomationAction).where(
+            DiagnosticAutomationAction.run_id == run.id,
+            DiagnosticAutomationAction.experiment_id == experiment_id,
+        )
+    ).scalars().all()
+    status_counts = {
+        status: sum(1 for row in actions if row.status == status)
+        for status in AUTOMATION_ACTION_STATUSES
+    }
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": AUTOMATION_RULES_VERSION,
+        "totalPolicies": len(policies),
+        "enabledPolicies": sum(1 for row in policies if row.enabled),
+        "totalActions": len(actions),
+        "pendingApproval": status_counts[
+            AUTOMATION_STATUS_PENDING_APPROVAL
+        ],
+        "approvedReady": status_counts[AUTOMATION_STATUS_APPROVED],
+        "rejected": status_counts[AUTOMATION_STATUS_REJECTED],
+        "executed": status_counts[AUTOMATION_STATUS_EXECUTED],
+        "byStatus": [
+            {"status": status, "actions": status_counts[status]}
+            for status in AUTOMATION_ACTION_STATUSES
+        ],
+        "scopePolicy": _automation_scope_policy(),
+        "interpretationPolicy": (
+            "Automation counts are approval-workflow metadata. Pending or "
+            "executed actions are not physical-failure labels, probabilities, "
+            "or evidence that a component actually failed."
+        ),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/automation/actions")
+def diagnostic_automation_actions(
+    limit: int = Query(default=100, ge=1, le=500),
+    status: str | None = Query(default=None),
+    action_type: str | None = Query(default=None),
+    case_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = _require_current_run(db)
+    if status is not None and status not in AUTOMATION_ACTION_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported automation action status",
+                "allowed": list(AUTOMATION_ACTION_STATUSES),
+            },
+        )
+    if action_type is not None and action_type not in AUTOMATION_ACTION_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Unsupported automation action type",
+                "allowed": list(AUTOMATION_ACTION_TYPES),
+            },
+        )
+
+    filters = [
+        DiagnosticAutomationAction.run_id == run.id,
+        DiagnosticAutomationAction.experiment_id == experiment_id,
+    ]
+    if status is not None:
+        filters.append(DiagnosticAutomationAction.status == status)
+    if action_type is not None:
+        filters.append(DiagnosticAutomationAction.action_type == action_type)
+    if case_id is not None:
+        filters.append(DiagnosticAutomationAction.case_id == case_id)
+
+    total = int(
+        db.scalar(
+            select(func.count(DiagnosticAutomationAction.id)).where(*filters)
+        )
+        or 0
+    )
+    rows = db.execute(
+        select(DiagnosticAutomationAction)
+        .where(*filters)
+        .order_by(
+            desc(DiagnosticAutomationAction.created_at),
+            desc(DiagnosticAutomationAction.id),
+        )
+        .limit(limit)
+    ).scalars().all()
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": AUTOMATION_RULES_VERSION,
+        "totalMatched": total,
+        "returned": len(rows),
+        "filters": {
+            "status": status,
+            "actionType": action_type,
+            "caseId": case_id,
+        },
+        "actions": [_automation_action_payload(row) for row in rows],
+        "scopePolicy": _automation_scope_policy(),
+    }
+
+
+@router.get("/automation/actions/{action_id}")
+def diagnostic_automation_action_detail(
+    action_id: int,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, row = _require_automation_action(action_id, db)
+    policy = db.execute(
+        select(DiagnosticAutomationPolicy)
+        .where(
+            DiagnosticAutomationPolicy.id == row.policy_id,
+            DiagnosticAutomationPolicy.run_id == run.id,
+            DiagnosticAutomationPolicy.experiment_id == experiment_id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    activities = db.execute(
+        select(DiagnosticAutomationActivity)
+        .where(
+            DiagnosticAutomationActivity.run_id == run.id,
+            DiagnosticAutomationActivity.experiment_id == experiment_id,
+            DiagnosticAutomationActivity.action_id == row.id,
+        )
+        .order_by(
+            desc(DiagnosticAutomationActivity.created_at),
+            desc(DiagnosticAutomationActivity.id),
+        )
+    ).scalars().all()
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "action": _automation_action_payload(row),
+        "policy": (
+            _automation_policy_payload(policy)
+            if policy is not None
+            else None
+        ),
+        "activities": [
+            _automation_activity_payload(activity)
+            for activity in activities
+        ],
+        "scopePolicy": _automation_scope_policy(),
+    }
+
+
+@router.post("/automation/actions/{action_id}/approve")
+def approve_diagnostic_automation_action(
+    action_id: int,
+    request: DiagnosticAutomationActorRequest,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, row = _require_automation_action(action_id, db)
+    if row.status == AUTOMATION_STATUS_APPROVED:
+        return {
+            "changed": False,
+            "action": _automation_action_payload(row),
+        }
+    if row.status != AUTOMATION_STATUS_PENDING_APPROVAL:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Only PENDING_APPROVAL automation actions can be approved"
+            ),
+        )
+
+    now = datetime.now(timezone.utc)
+    row.status = AUTOMATION_STATUS_APPROVED
+    row.approved_at = now
+    row.approved_by = request.actor
+    row.updated_at = now
+    db.add(
+        DiagnosticAutomationActivity(
+            action_id=row.id,
+            policy_id=row.policy_id,
+            run_id=run.id,
+            experiment_id=experiment_id,
+            case_id=row.case_id,
+            vehicle_id=row.vehicle_id,
+            created_at=now,
+            activity_type=AUTOMATION_ACTIVITY_ACTION_APPROVED,
+            actor=request.actor,
+            note_text=request.note,
+            details_json=json.dumps(
+                {"fromStatus": AUTOMATION_STATUS_PENDING_APPROVAL,
+                 "toStatus": AUTOMATION_STATUS_APPROVED},
+                sort_keys=True,
+            ),
+        )
+    )
+    db.commit()
+    db.refresh(row)
+    return {
+        "changed": True,
+        "action": _automation_action_payload(row),
+        "interpretationPolicy": (
+            "Approval authorizes a later explicit execution request; approval "
+            "alone performs no workflow mutation."
+        ),
+    }
+
+
+@router.post("/automation/actions/{action_id}/reject")
+def reject_diagnostic_automation_action(
+    action_id: int,
+    request: DiagnosticAutomationActorRequest,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, row = _require_automation_action(action_id, db)
+    if row.status == AUTOMATION_STATUS_REJECTED:
+        return {
+            "changed": False,
+            "action": _automation_action_payload(row),
+        }
+    if row.status not in (
+        AUTOMATION_STATUS_PENDING_APPROVAL,
+        AUTOMATION_STATUS_APPROVED,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Only pending or approved automation actions can be rejected"
+            ),
+        )
+
+    previous = row.status
+    now = datetime.now(timezone.utc)
+    row.status = AUTOMATION_STATUS_REJECTED
+    row.rejected_at = now
+    row.rejected_by = request.actor
+    row.updated_at = now
+    db.add(
+        DiagnosticAutomationActivity(
+            action_id=row.id,
+            policy_id=row.policy_id,
+            run_id=run.id,
+            experiment_id=experiment_id,
+            case_id=row.case_id,
+            vehicle_id=row.vehicle_id,
+            created_at=now,
+            activity_type=AUTOMATION_ACTIVITY_ACTION_REJECTED,
+            actor=request.actor,
+            note_text=request.note,
+            details_json=json.dumps(
+                {
+                    "fromStatus": previous,
+                    "toStatus": AUTOMATION_STATUS_REJECTED,
+                },
+                sort_keys=True,
+            ),
+        )
+    )
+    db.commit()
+    db.refresh(row)
+    return {
+        "changed": True,
+        "action": _automation_action_payload(row),
+    }
+
+
+def _execute_approved_automation_workflow(
+    *,
+    row: DiagnosticAutomationAction,
+    case: DiagnosticCase,
+    actor: str,
+    db: Session,
+    run: DiagnosticModelRun,
+    experiment_id: str,
+    now: datetime,
+) -> dict:
+    if row.action_type == AUTOMATION_ACTION_ENSURE_REVIEW_PLAN:
+        plan = db.execute(
+            select(DiagnosticMaintenancePlan)
+            .where(
+                DiagnosticMaintenancePlan.run_id == run.id,
+                DiagnosticMaintenancePlan.experiment_id == experiment_id,
+                DiagnosticMaintenancePlan.case_id == case.id,
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        if plan is not None:
+            return {
+                "outcome": "ALREADY_EXISTS",
+                "workflowType": "MAINTENANCE_PLAN",
+                "planId": plan.id,
+                "state": plan.state,
+            }
+
+        plan = DiagnosticMaintenancePlan(
+            run_id=run.id,
+            experiment_id=experiment_id,
+            case_id=case.id,
+            vehicle_id=case.vehicle_id,
+            rules_version=PROGNOSTIC_RULES_VERSION,
+            created_at=now,
+            updated_at=now,
+            state="REVIEW",
+            owner=None,
+            target_mileage=None,
+            note=(
+                f"Created by approved automation action {row.id} from policy "
+                f"{row.policy_key}. Workflow metadata only; no physical "
+                "failure conclusion is implied."
+            ),
+        )
+        db.add(plan)
+        db.flush()
+        db.add(
+            DiagnosticMaintenanceActivity(
+                plan_id=plan.id,
+                run_id=run.id,
+                experiment_id=experiment_id,
+                case_id=case.id,
+                vehicle_id=case.vehicle_id,
+                created_at=now,
+                activity_type=MAINTENANCE_ACTIVITY_CREATED,
+                actor=actor,
+                from_value=None,
+                to_value="REVIEW",
+                note_text=plan.note,
+            )
+        )
+        return {
+            "outcome": "CREATED",
+            "workflowType": "MAINTENANCE_PLAN",
+            "planId": plan.id,
+            "state": plan.state,
+        }
+
+    if row.action_type == AUTOMATION_ACTION_ENSURE_WATCHLIST:
+        watchlist = db.execute(
+            select(DiagnosticWatchlistEntry)
+            .where(
+                DiagnosticWatchlistEntry.run_id == run.id,
+                DiagnosticWatchlistEntry.experiment_id == experiment_id,
+                DiagnosticWatchlistEntry.case_id == case.id,
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        if watchlist is not None:
+            return {
+                "outcome": "ALREADY_EXISTS",
+                "workflowType": "WATCHLIST",
+                "watchlistId": watchlist.id,
+            }
+
+        watchlist = DiagnosticWatchlistEntry(
+            run_id=run.id,
+            experiment_id=experiment_id,
+            case_id=case.id,
+            vehicle_id=case.vehicle_id,
+            created_at=now,
+            actor=actor,
+            note=(
+                f"Added by approved automation action {row.id} from policy "
+                f"{row.policy_key}."
+            ),
+        )
+        db.add(watchlist)
+        db.flush()
+        return {
+            "outcome": "CREATED",
+            "workflowType": "WATCHLIST",
+            "watchlistId": watchlist.id,
+        }
+
+    raise HTTPException(
+        status_code=422,
+        detail=f"Unsupported automation action type: {row.action_type}",
+    )
+
+
+@router.post("/automation/actions/{action_id}/execute")
+def execute_diagnostic_automation_action(
+    action_id: int,
+    request: DiagnosticAutomationActorRequest,
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, row = _require_automation_action(action_id, db)
+    if row.status == AUTOMATION_STATUS_EXECUTED:
+        return {
+            "changed": False,
+            "action": _automation_action_payload(row),
+            "executionResult": _json_object(row.execution_result_json),
+        }
+    if row.status != AUTOMATION_STATUS_APPROVED:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Human approval is required before an automation action can "
+                "be executed"
+            ),
+        )
+
+    _, _, case = _require_current_case(row.case_id, db)
+    if case.vehicle_id != row.vehicle_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Automation action case/vehicle identity mismatch",
+        )
+    if case.status == CASE_CLOSED:
+        raise HTTPException(
+            status_code=409,
+            detail="Closed diagnostic cases cannot receive automation execution",
+        )
+
+    now = datetime.now(timezone.utc)
+    result = _execute_approved_automation_workflow(
+        row=row,
+        case=case,
+        actor=request.actor,
+        db=db,
+        run=run,
+        experiment_id=experiment_id,
+        now=now,
+    )
+    row.status = AUTOMATION_STATUS_EXECUTED
+    row.executed_at = now
+    row.executed_by = request.actor
+    row.execution_result_json = json.dumps(result, sort_keys=True)
+    row.updated_at = now
+    db.add(
+        DiagnosticAutomationActivity(
+            action_id=row.id,
+            policy_id=row.policy_id,
+            run_id=run.id,
+            experiment_id=experiment_id,
+            case_id=row.case_id,
+            vehicle_id=row.vehicle_id,
+            created_at=now,
+            activity_type=AUTOMATION_ACTIVITY_ACTION_EXECUTED,
+            actor=request.actor,
+            note_text=request.note,
+            details_json=json.dumps(result, sort_keys=True),
+        )
+    )
+    db.commit()
+    db.refresh(row)
+    return {
+        "changed": True,
+        "action": _automation_action_payload(row),
+        "executionResult": result,
+        "scopePolicy": _automation_scope_policy(),
+        "interpretationPolicy": (
+            "Execution is approval-gated and limited to operational workflow "
+            "metadata. It does not rewrite replay, events, episodes, case "
+            "evidence, model artifacts, benchmark evidence, or private failure "
+            "truth."
         ),
     }
 
