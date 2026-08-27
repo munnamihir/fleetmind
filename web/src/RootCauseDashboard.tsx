@@ -201,7 +201,11 @@ async function fetchJson<T>(url: string, signal: AbortSignal): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function RootCauseDashboard() {
+export function RootCauseDashboard({
+  activeView = 'overview',
+}: {
+  activeView?: string;
+}) {
   const [summary, setSummary] = useState<DiagnosticSummary | null>(null);
   const [status, setStatus] = useState<DiagnosticStatus | null>(null);
   const [benchmark, setBenchmark] = useState<DiagnosticBenchmark | null>(null);
@@ -216,44 +220,96 @@ export function RootCauseDashboard() {
     let timerId: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | undefined;
 
+    const needsSummary = [
+      'overview',
+      'hypotheses',
+      'benchmark',
+      'incident-queue',
+      'vehicle-investigation',
+    ].includes(activeView);
+
+    const needsBenchmark = [
+      'overview',
+      'benchmark',
+      'model-comparison',
+    ].includes(activeView);
+
+    const needsIncidents = [
+      'incident-queue',
+      'vehicle-investigation',
+    ].includes(activeView);
+
     async function refresh() {
       if (!alive) return;
+
       controller = new AbortController();
+
       try {
-        const [nextSummary, nextStatus, nextBenchmark, nextIncidents] =
-          await Promise.all([
-            fetchJson<DiagnosticSummary>(
-              `${API}/api/v1/diagnostics/summary?high_confidence_threshold=0.70`,
-              controller.signal,
-            ),
-            fetchJson<DiagnosticStatus>(`${API}/api/v1/diagnostics/status`, controller.signal),
-            fetchJson<DiagnosticBenchmark>(`${API}/api/v1/diagnostics/benchmark`, controller.signal),
-            fetchJson<DiagnosticIncident[]>(
-              `${API}/api/v1/diagnostics/incidents?limit=50&min_confidence=0.70`,
-              controller.signal,
-            ),
-          ]);
+        const [
+          nextStatus,
+          nextSummary,
+          nextBenchmark,
+          nextIncidents,
+        ] = await Promise.all([
+          fetchJson<DiagnosticStatus>(
+            `${API}/api/v1/diagnostics/status`,
+            controller.signal,
+          ),
+          needsSummary
+            ? fetchJson<DiagnosticSummary>(
+                `${API}/api/v1/diagnostics/summary?high_confidence_threshold=0.70`,
+                controller.signal,
+              )
+            : Promise.resolve(null),
+          needsBenchmark
+            ? fetchJson<DiagnosticBenchmark>(
+                `${API}/api/v1/diagnostics/benchmark`,
+                controller.signal,
+              )
+            : Promise.resolve(null),
+          needsIncidents
+            ? fetchJson<DiagnosticIncident[]>(
+                `${API}/api/v1/diagnostics/incidents?limit=50&min_confidence=0.70`,
+                controller.signal,
+              )
+            : Promise.resolve(null),
+        ]);
 
         if (alive) {
-          setSummary(nextSummary);
           setStatus(nextStatus);
-          setBenchmark(nextBenchmark);
-          setIncidents(nextIncidents);
+
+          if (nextSummary) setSummary(nextSummary);
+          if (nextBenchmark) setBenchmark(nextBenchmark);
+
+          if (nextIncidents) {
+            setIncidents(nextIncidents);
+            setSelectedVehicleId(current => {
+              if (
+                current &&
+                nextIncidents.some(item => item.vehicleId === current)
+              ) {
+                return current;
+              }
+              return nextIncidents[0]?.vehicleId ?? current;
+            });
+          }
+
           setError(null);
-          setSelectedVehicleId(current => {
-            if (current && nextIncidents.some(item => item.vehicleId === current)) {
-              return current;
-            }
-            return nextIncidents[0]?.vehicleId ?? current;
-          });
         }
       } catch (refreshError) {
         if (
           alive &&
-          !(refreshError instanceof DOMException && refreshError.name === 'AbortError')
+          !(
+            refreshError instanceof DOMException &&
+            refreshError.name === 'AbortError'
+          )
         ) {
           console.error('Root Cause dashboard refresh failed:', refreshError);
-          setError(refreshError instanceof Error ? refreshError.message : 'Diagnostic API unavailable');
+          setError(
+            refreshError instanceof Error
+              ? refreshError.message
+              : 'Diagnostic API unavailable',
+          );
         }
       } finally {
         controller = undefined;
@@ -262,14 +318,19 @@ export function RootCauseDashboard() {
     }
 
     void refresh();
+
     return () => {
       alive = false;
       if (timerId !== undefined) clearTimeout(timerId);
       controller?.abort();
     };
-  }, []);
+  }, [activeView]);
 
   useEffect(() => {
+    if (activeView !== 'vehicle-investigation') {
+      return;
+    }
+
     if (!selectedVehicleId) {
       setSelectedVehicle(null);
       return;
@@ -293,7 +354,7 @@ export function RootCauseDashboard() {
       });
 
     return () => controller.abort();
-  }, [selectedVehicleId, status?.runId]);
+  }, [activeView, selectedVehicleId, status?.runId]);
 
   const classDistribution = useMemo(() => {
     const byClass = new Map((summary?.byClass ?? []).map(item => [item.class, item]));
@@ -572,72 +633,96 @@ export function RootCauseDashboard() {
         </article>
       </section>
 
-      <DiagnosticCaseIntelligence
-        selectedVehicleId={selectedVehicleId}
-        onSelectVehicle={setSelectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'cases' && (
+        <DiagnosticCaseIntelligence
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
-      <FleetPatternIntelligence
-        selectedVehicleId={selectedVehicleId}
-        onSelectVehicle={setSelectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'fleet-patterns' && (
+        <FleetPatternIntelligence
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
-      <PrognosticMaintenanceIntelligence
-        selectedVehicleId={selectedVehicleId}
-        onSelectVehicle={setSelectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'prognostics' && (
+        <PrognosticMaintenanceIntelligence
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
-      <OperationalAutomationIntelligence
-        selectedVehicleId={selectedVehicleId}
-        onSelectVehicle={setSelectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'automation' && (
+        <OperationalAutomationIntelligence
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
-      <FleetDecisionIntelligence
-        selectedVehicleId={selectedVehicleId}
-        onSelectVehicle={setSelectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'fleet-decisions' && (
+        <FleetDecisionIntelligence
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
-      <VehicleOperationalTwin
-        selectedVehicleId={selectedVehicleId}
-        onSelectVehicle={setSelectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'vehicle-twin' && (
+        <VehicleOperationalTwin
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
-      <FleetIntelligencePlanning runId={status?.runId} />
+      {activeView === 'planning' && (
+        <FleetIntelligencePlanning runId={status?.runId} />
+      )}
 
-      <FleetCommandOperations
-        selectedVehicleId={selectedVehicleId}
-        onSelectVehicle={setSelectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'fleet-command' && (
+        <FleetCommandOperations
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
-      <DiagnosticTransitionIntelligence
-        selectedVehicleId={selectedVehicleId}
-        onSelectVehicle={setSelectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'transitions' && (
+        <DiagnosticTransitionIntelligence
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
-      <DiagnosticEpisodeIntelligence
-        selectedVehicleId={selectedVehicleId}
-        onSelectVehicle={setSelectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'episodes' && (
+        <DiagnosticEpisodeIntelligence
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
-      <DiagnosticEventFeed
-        selectedVehicleId={selectedVehicleId}
-        onSelectVehicle={setSelectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'events' && (
+        <DiagnosticEventFeed
+          selectedVehicleId={selectedVehicleId}
+          onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
-      <DiagnosticReplay
-        vehicleId={selectedVehicleId}
-        runId={status?.runId}
-      />
+      {activeView === 'replay' && (
+        <DiagnosticReplay
+          vehicleId={selectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
 
       <section className="panel diagnosticComparisonPanel">
         <div className="panelTitleRow">
