@@ -1,125 +1,747 @@
 # FleetMind Architecture
 
-## Phase 1 data path
+## Architecture status
+
+FleetMind has evolved from a streaming reliability demo into a layered reliability-intelligence and human-controlled fleet-operations system.
+
+The current implementation includes:
+
+- streaming telemetry and private synthetic failure truth
+- reliability and firmware analysis
+- predictive-maintenance ML with benchmark lineage
+- diagnostic events, episodes, replay, and cases
+- fleet pattern and prognostic intelligence
+- maintenance and guarded workflow automation
+- vehicle operational twins and fleet decision intelligence
+- Fleet Command
+- evidence explainability
+- decision-queue ownership
+- closed-loop recommendation materialization
+- human-controlled lifecycle transitions
+- dashboard nested navigation with active polling
+
+Phase 8.1 is complete. Phase 8.2 will add post-execution outcome observation.
+
+---
+
+## Current data path
 
 ```text
-Synthetic EV Fleet
-      │
-      │ JSON telemetry
-      ▼
-Redpanda / Kafka
-      │
-      ▼
-Anomaly Worker ───────────────┐
-      │                       │
-      │ explainable risk      │ alerts
-      ▼                       ▼
-PostgreSQL               PostgreSQL
-      │                       │
-      └──────────┬────────────┘
-                 ▼
-             FastAPI
-                 │
-                 ▼
-      React Engineering Console
+                         SYNTHETIC EV FLEET
+                               │
+             ┌─────────────────┴──────────────────┐
+             │                                    │
+             │ observable telemetry               │ private failure truth
+             │                                    │ evaluation only
+             ▼                                    ▼
+                     Redpanda / Kafka topics
+                               │
+                               ▼
+                       Risk / persistence worker
+                               │
+                               ▼
+                           PostgreSQL
+             ┌─────────────────┼──────────────────────┐
+             │                 │                      │
+             ▼                 ▼                      ▼
+        Fleet state       ML / benchmark       Diagnostic store
+        telemetry         predictions          events / episodes
+        alerts            lineage              cases / workflow
+        failures          snapshots            recommendations
+             │                 │                      │
+             └─────────────────┼──────────────────────┘
+                               ▼
+                            FastAPI
+                               │
+                               ▼
+                    React Engineering Console
 ```
 
-## Why this architecture
+The architecture deliberately keeps private synthetic truth out of normal telemetry and out of operational recommendation inputs unless an endpoint is explicitly an offline/evaluation path.
 
-The first milestone separates generation, transport, analytics, persistence, API, and UI so each layer can evolve independently. Kafka-compatible Redpanda makes telemetry replayable and allows future workers for Weibull analysis, feature extraction, firmware experiments, and RUL prediction to subscribe without coupling them to ingestion.
+---
 
-## Event contract
+## Runtime services
 
-Telemetry deliberately contains observable engineering measurements and deployment metadata, not a `failed` or `is_degraded` label. The simulator maintains latent degradation internally and lets the analytics layer infer it.
+### `simulator`
 
-Key fields:
+Produces synthetic EV telemetry and maintains latent degradation/failure mechanisms.
 
-- Vehicle: ID, model, factory, firmware, mileage, component revision.
-- Environment: ambient temperature and speed.
-- Battery: SOC, voltage, current, temperature, cell imbalance.
-- Powertrain: motor/inverter temperatures and motor RPM.
-- Thermal loop: coolant temperature, coolant-pump RPM and current.
+Responsibilities:
 
-## Phase 2 target architecture
+- vehicle population generation
+- mileage progression
+- thermal/pump signals
+- firmware / factory / model / revision context
+- hidden degradation
+- experiment identity
+- private evaluation truth
+
+### Redpanda
+
+Kafka-compatible event transport.
+
+Responsibilities:
+
+- telemetry topic
+- failure/evaluation topic
+- decoupled producer/consumer flow
+- replayable event transport
+
+### `worker`
+
+Consumes observable telemetry and private truth through their separate contracts.
+
+Responsibilities:
+
+- telemetry persistence
+- explainable risk calculation
+- alert generation
+- failure-truth persistence
+- experiment scoping
+
+### PostgreSQL
+
+Authoritative persistence for:
+
+- telemetry
+- alerts
+- synthetic failure truth
+- ML runs and predictions
+- benchmark metadata
+- diagnostic events
+- diagnostic episodes
+- diagnostic cases
+- maintenance plans
+- watchlists / views
+- automation policies and actions
+- fleet snapshots
+- operational twin snapshots
+- closed-loop recommendations
+- recommendation audit activity
+
+### `ml-trainer`
+
+Builds deterministic training/evaluation datasets and predictive-maintenance runs.
+
+Responsibilities:
+
+- rolling feature windows
+- future-horizon labels
+- right-censoring handling
+- development/validation/benchmark partitioning
+- XGBoost and logistic-regression baseline
+- calibration / threshold selection
+- locked benchmark snapshot
+- model lineage
+- diagnostic replay/backfill jobs
+
+### FastAPI
+
+Provides the public engineering and operational API layer.
+
+Major API families:
+
+- fleet
+- alerts
+- vehicles
+- reliability
+- firmware
+- ML
+- diagnostics
+- cases
+- patterns
+- prognostics
+- maintenance
+- automation
+- fleet intelligence
+- vehicle twins
+- fleet twin
+- workflow effectiveness
+- Fleet Command
+- explainability
+- decision queue
+- closed loop
+
+### React console
+
+Provides engineering and operator workflows.
+
+Top-level pages:
 
 ```text
-                         ┌─────────────────────────────┐
-                         │         FleetMind           │
-                         └─────────────────────────────┘
-                                      │
-Vehicle / Robot / Charger telemetry ──┼──► Kafka
-                                      │
-             ┌────────────────────────┼────────────────────────┐
-             ▼                        ▼                        ▼
-       Stream features          Raw Data Lake            Online state
-       Spark / Flink          Parquet + Iceberg           Redis/PG
-             │                        │                        │
-             ├───────────────┬────────┴─────────────┐          │
-             ▼               ▼                      ▼          ▼
-       Anomaly models    Reliability engine      RUL model   API
-             │          Weibull / survival          │          │
-             └───────────────┬──────────────────────┘          │
-                             ▼                                 │
-                     Root-cause graph ◄────────────────────────┘
-                             │
-                             ▼
-                    Engineering Console
+Fleet Overview
+Incidents
+Reliability
+Cohorts
+Components
+Firmware
+Predictive ML
+Root Cause
 ```
 
-## Engineering principles
+Each page uses internal tabs to avoid large stacked dashboards.
 
-1. **Explainability before complexity.** V1 uses transparent signals so every alert can show evidence.
-2. **No leaked labels.** Failure state is not included in production telemetry messages.
-3. **Cohort-aware analysis.** Firmware, factory, component revision, environment and mileage are first-class dimensions.
-4. **Replayability.** Incidents should be reproducible from the event log.
-5. **Model-agnostic platform.** The platform should accept rules, classical ML, time-series models and survival analysis behind stable interfaces.
+Root Cause contains the diagnostic and fleet-intelligence modules, including Fleet Command.
 
-## Predictive ML benchmark boundary (Phase 5.1)
+---
 
-FleetMind separates model development from benchmark claims at the vehicle boundary:
+# Data and claim boundaries
+
+## Observable telemetry vs private truth
+
+Telemetry deliberately contains observable engineering measurements and deployment metadata, not a direct `failed` or `is_degraded` label.
+
+Key telemetry context includes:
+
+- vehicle ID
+- model
+- factory
+- firmware
+- mileage
+- component revision
+- ambient temperature
+- speed
+- battery signals
+- inverter/motor signals
+- coolant temperature
+- coolant-pump RPM/current
+
+Private failure truth is stored separately and is intended for synthetic evaluation.
+
+```text
+observable telemetry ──────────────► operational analysis
+private synthetic truth ───────────► controlled evaluation
+```
+
+## Engineering evidence vs causality
+
+FleetMind can show that signals co-occur, that a cohort is enriched, that a model assigns confidence, or that workflow state changed.
+
+Those facts do not by themselves prove a physical causal mechanism.
+
+## Workflow state vs physical state
+
+FleetMind closed-loop execution currently means **workflow execution**.
+
+It does not:
+
+- send a command to a real vehicle
+- prove that a technician performed a repair
+- mutate simulated physical condition as a consequence of a recommendation
+- establish that maintenance caused later telemetry changes
+
+---
+
+# Reliability analysis boundary
+
+For pump-revision reliability, FleetMind treats observed synthetic failures as lifetimes and non-failed vehicles as right-censored observations.
+
+Current outputs include:
+
+- Weibull β / η
+- B10 / B50
+- reliability at selected mileage points
+- Kaplan-Meier curve
+- observed failure rate
+- early-warning detection rate
+- lead mileage
+- accelerated-time lead
+
+These are synthetic-experiment reliability outputs, not real-world OEM reliability claims.
+
+---
+
+# Firmware regression architecture
+
+Firmware comparison builds matched treatment/control observations from the current experiment.
+
+The analysis uses deployment and telemetry context such as:
+
+- pump revision
+- mileage band
+- ambient-temperature band
+- firmware
+
+Outputs include:
+
+- matched population
+- target/control failure counts
+- target/control failure rates
+- risk ratio and interval
+- absolute risk increase
+- Mantel-Haenszel common odds ratio
+- Cochran-Mantel-Haenszel statistic / p-value
+- supportive telemetry deltas
+- hardware × software interactions
+
+The private simulator cause is not exposed as an operational model feature.
+
+---
+
+# Predictive ML boundaries
+
+## Prospective feature/label contract
+
+```text
+telemetry at or before anchor
+          │
+          ▼
+rolling sensor features
+          │
+          ▼
+model input
+          │
+          └──────── asks about future failure horizon
+```
+
+A window is positive only when an eligible private synthetic failure occurs after the anchor and within the configured future mileage horizon.
+
+A healthy-looking window without enough future observation is right-censored rather than forced into the negative class.
+
+## Development vs benchmark
 
 ```text
 eligible causal windows
-        |
-        +-- development train vehicles ---> model fit
-        |
-        +-- group-stratified development validation vehicles ---> calibration + threshold
-        |
-        `-- frozen benchmark vehicles ---> evaluation only
+        │
+        ├── development train vehicles
+        │
+        ├── development validation vehicles
+        │
+        └── frozen benchmark vehicles
 ```
 
-Frozen benchmark membership is a deterministic SHA-256 bucket of `vehicle_id` with a fixed seed. It does not depend on labels, failure status, firmware, component revision, or model results, so a vehicle cannot migrate between development and benchmark as new failure truth arrives.
-Within the remaining development pool, validation selection is deterministic and group-stratified by causal failure support. This stratification is allowed only inside development data; benchmark membership remains label-agnostic and untouched. All windows from one vehicle stay in a single partition.
+Benchmark vehicle membership is deterministic and label-agnostic.
 
-Operational scoring is separate: after a complete run, the selected XGBoost model scores the latest causal window for every active vehicle. A benchmark can be marked `insufficient_evidence` while operational scoring continues. Headline benchmark claims require at least 1,000 benchmark windows, 20 positive windows, 8 distinct failure vehicles, and both outcome classes.
+Within development data, validation assignment can be group-stratified by causal support while keeping each vehicle in one partition.
 
-Every run also fits a logistic-regression baseline using the identical sensor features and cohorts. XGBoost is therefore compared against a simple model instead of against no baseline. Historical live predictions are retained by model run and exposed as a per-vehicle longitudinal risk series.
+## Locked benchmark snapshot
 
+A frozen vehicle cohort alone is not an immutable test dataset because more causal windows can accumulate.
 
-## Benchmark snapshot + lineage boundary (Phase 5.2)
-
-A frozen *vehicle cohort* is not yet an immutable benchmark dataset because new causal windows and newly observed failures can accumulate for those same vehicles. Phase 5.2 therefore introduces a second boundary:
+FleetMind therefore locks an exact benchmark snapshot once the evidence gate qualifies:
 
 ```text
 frozen benchmark vehicle IDs
-          |
-          v
-accumulating eligible causal windows
-          |
-          | evidence gate passes
-          v
+          │
+          ▼
+eligible benchmark windows
+          │
+          │ qualification passes
+          ▼
 LOCKED BENCHMARK SNAPSHOT
   - exact feature rows
-  - exact labels
-  - exact anchor timestamps/mileage
-  - SHA-256 data digest
+  - labels
+  - anchor timestamp / mileage
+  - data SHA-256
   - feature-schema SHA-256
-          |
-          v
-all later models in the same lineage
-are evaluated on the identical snapshot
+          │
+          ▼
+later runs in the same lineage
+use the same evaluation artifact
 ```
 
-A model lineage identifies a compatible feature/evaluation contract. Historical operational predictions are comparable only inside one lineage. The API therefore returns same-lineage history by default and additionally isolates the latest mileage-continuous experiment epoch. Simulator odometer resets create a new epoch; feature windows cannot cross the reset, and failure truth from a prior epoch is ignored.
+Missing/tampered snapshots or incompatible feature schemas fail closed.
 
-The locked snapshot is deliberately fail-closed. Missing/tampered artifacts or feature-schema drift stop benchmark evaluation and require an explicit lineage bump rather than silently changing the benchmark.
+## Lineage and experiment epochs
+
+Historical model predictions are comparable only inside a compatible model lineage and mileage-continuous experiment epoch.
+
+Large backward odometer jumps create a new epoch.
+
+Feature windows cannot cross that boundary, and failure truth from a prior epoch cannot become future truth for a new experiment.
+
+---
+
+# Diagnostic architecture
+
+The diagnostic stack turns isolated model/evidence observations into reproducible investigation state.
+
+```text
+model + telemetry evidence
+          │
+          ▼
+     diagnostic event
+          │
+          ▼
+       transition
+          │
+          ▼
+        episode
+          │
+          ▼
+          case
+          │
+          ├── evidence / hypothesis
+          ├── assignment / workflow
+          ├── watchlist / views
+          └── replay
+```
+
+## Events
+
+Events represent diagnostic evidence/state changes with anti-chatter behavior.
+
+## Episodes
+
+Episodes group related events across time into a longitudinal diagnostic context.
+
+## Cases
+
+Cases provide the human investigation/workflow layer.
+
+They track operational status, review priority, assignment, evidence, and activity without claiming that a case label is a physical-failure diagnosis.
+
+## Replay
+
+Replay reconstructs run-frozen diagnostic evidence and state so investigations can be reproduced.
+
+---
+
+# Fleet intelligence architecture
+
+FleetMind derives several higher-level operational views from run-frozen diagnostic and workflow records.
+
+## Fleet Pattern Intelligence
+
+```text
+cases
+  ├── hypothesis
+  ├── firmware
+  ├── factory
+  ├── pump revision
+  └── model
+        ↓
+hotspots / recurring clusters / similar cases
+```
+
+These are descriptive investigation shortcuts, not causal enrichment.
+
+## Prognostics & Maintenance Intelligence
+
+The prognostic layer fits trajectories of model-hypothesis confidence against mileage and may extrapolate toward a configured model-confidence threshold.
+
+```text
+historical model confidence
+          ↓
+run-frozen trajectory fit
+          ↓
+experimental threshold horizon
+          ↓
+maintenance review queue
+```
+
+This is intentionally **not physical remaining useful life**.
+
+Maintenance plans are operator-owned workflow records.
+
+## Operational Automation
+
+Automation evaluates deterministic, source-versioned policies against run-frozen operational evidence.
+
+Lifecycle:
+
+```text
+dry-run simulation
+      ↓
+explicit evaluate
+      ↓
+PENDING_APPROVAL
+      ↓
+human approve/reject
+      ↓
+explicit execute
+```
+
+Execution is limited to guarded workflow metadata effects. No automatic physical action occurs.
+
+## Vehicle Operational Twin
+
+The vehicle operational twin unifies:
+
+- model state
+- diagnostic state
+- case state
+- prognostic state
+- maintenance state
+- automation state
+- fleet-decision state
+- coverage state
+
+It provides a timeline, lineage graph, evidence inventory, checkpoints, and comparison.
+
+It is an **operational twin**, not a physics twin.
+
+## Fleet Decision Intelligence
+
+Fleet decision state combines current-run model outputs with persisted diagnostic/workflow records.
+
+Outputs include:
+
+- deterministic decision state
+- attention score
+- workflow load units
+- coverage gaps
+- queue ordering
+- cohort concentration
+- no-write scenario simulation
+- versioned checkpoints
+
+Attention score is not a physical failure probability.
+
+---
+
+# Fleet Command architecture
+
+Fleet Command is the operator-facing aggregation of the fleet-intelligence stack.
+
+```text
+                FLEET COMMAND
+                      │
+        ┌─────────────┼──────────────────┐
+        ▼             ▼                  ▼
+ Command Center   Explainability    Decision Queue
+        │             │                  │
+        └─────────────┼──────────────────┘
+                      ▼
+                  Closed Loop
+```
+
+## Command Center
+
+Provides:
+
+- fleet-level metrics
+- operator queue groups
+- cohort analysis
+- deterministic attention factors
+
+## Explainability
+
+Provides:
+
+- vehicle attention decomposition
+- evidence inventory
+- workflow/evidence lineage
+
+The lineage is a data/workflow lineage, not a physical causal graph.
+
+## Decision Queue
+
+Provides:
+
+- active recommendation queue
+- ownership
+- lifecycle/status grouping
+- assignment/unassignment
+- explicit operator transitions
+
+## Closed Loop
+
+Recommendation evaluation can be previewed without persistence.
+
+Persistent materialization is intentionally restricted to an explicitly selected vehicle.
+
+```text
+candidate evidence
+      ↓
+deterministic recommendation key
+      ↓
+PROPOSED recommendation
+      ↓
+CREATED audit activity
+```
+
+The database enforces recommendation-key uniqueness.
+
+Normal duplicate requests are caught through a bulk existing-key lookup. A narrower concurrent insert race is isolated in a database savepoint; if another request wins the unique-key race, FleetMind reloads the existing recommendation rather than returning a duplicate-write failure.
+
+Recommendation and `CREATED` audit activity are flushed atomically inside the savepoint.
+
+## Lifecycle guardrail
+
+```text
+PROPOSED
+   ↓ acknowledge
+ACKNOWLEDGED
+   ↓ request approval
+APPROVAL_REQUIRED
+   ↓ approve
+APPROVED
+   ↓ mark ready
+EXECUTION_READY
+   ↓ explicit execute workflow
+EXECUTED
+```
+
+There is no automatic approval and no automatic execution.
+
+---
+
+# Frontend navigation and polling architecture
+
+The dashboard uses nested tabs across the left-navigation pages.
+
+The initial nested-tab implementation hid panels visually but kept heavy Root Cause components mounted. Because many modules have their own polling loops, hidden modules continued to hit the API and temporarily exhausted SQLAlchemy's default connection pool.
+
+The corrected architecture is:
+
+```text
+active left page
+      ↓
+only that page's shared data polling
+
+Root Cause selected
+      ↓
+only active heavy Root Cause module mounted
+
+Fleet Command selected
+      ↓
+only active Fleet Command workspace polling
+```
+
+This keeps React Strict Mode enabled and fixes request fan-out without masking the problem by increasing `pool_size` or `max_overflow`.
+
+Inactive heavy modules are intentionally unmounted.
+
+---
+
+# Database and idempotency principles
+
+FleetMind uses PostgreSQL plus SQLAlchemy.
+
+Important rules:
+
+1. Database uniqueness is the final source of truth for idempotent materialization.
+2. Application-level lookups handle the normal repeat-request path efficiently.
+3. Concurrent insert races are handled explicitly rather than assumed away.
+4. Audit activity should remain transactionally consistent with the state it describes.
+5. Pool-size increases should not be used to compensate for unnecessary frontend request fan-out.
+
+---
+
+# Current UI hierarchy
+
+```text
+LEFT NAV
+│
+├── Fleet Overview
+├── Incidents
+├── Reliability
+├── Cohorts
+├── Components
+├── Firmware
+├── Predictive ML
+└── Root Cause
+      │
+      ├── Overview / hypotheses / benchmark
+      ├── incident queue / vehicle investigation
+      ├── Cases
+      ├── Fleet Patterns
+      ├── Prognostics
+      ├── Automation
+      ├── Fleet Decisions
+      ├── Vehicle Twin
+      ├── Planning
+      ├── Fleet Command
+      ├── Transitions
+      ├── Episodes
+      ├── Events
+      ├── Replay
+      └── Model Comparison
+```
+
+Fleet Command adds another focused navigation layer:
+
+```text
+Fleet Command
+│
+├── Command Center
+├── Explainability
+├── Decision Queue
+└── Closed Loop
+```
+
+This hierarchy is intentional: the left navigation selects the product domain, the page tab selects a component/view, and Fleet Command workspaces select operator tasks.
+
+---
+
+# Engineering principles
+
+1. **Explainability before complexity.** Every important operational score should be decomposable into evidence/factors.
+2. **No leaked labels.** Private synthetic failure truth does not belong in normal operational telemetry.
+3. **Cohort-aware analysis.** Firmware, factory, component revision, model, environment, and mileage are first-class context.
+4. **Replayability.** Diagnostic state must be reproducible from run-frozen evidence.
+5. **Model lineage matters.** Historical predictions are not automatically comparable across incompatible model families.
+6. **Human control at action boundaries.** Recommendations may be generated automatically; approval/execution remain explicit.
+7. **Idempotency at persistence boundaries.** Deterministic keys plus database uniqueness protect repeated/concurrent materialization.
+8. **Workflow truth is not physical truth.** Execution metadata must not be presented as proof of repair.
+9. **Inactive UI should be operationally inactive.** Hidden heavy tabs should not continue unnecessary polling.
+10. **Do not solve architecture problems with larger limits first.** Reduce waste before increasing database/stream capacity.
+
+---
+
+# Phase 8.2 target architecture — outcome verification
+
+The next phase adds a post-execution observation layer.
+
+```text
+EXECUTED recommendation
+          │
+          ▼
+baseline evidence snapshot
+          │
+          ▼
+observation window
+          │
+          ▼
+post-execution evidence snapshot
+          │
+          ▼
+deterministic outcome evaluator
+          │
+          ├── IMPROVED
+          ├── STABLE
+          ├── WORSENED
+          ├── NO_MATERIAL_CHANGE
+          └── INSUFFICIENT_DATA
+```
+
+The evaluator will compare observable evidence such as model confidence, attention score, diagnostic state, case state, and workflow coverage.
+
+It must not turn post-workflow correlation into a repair-causality claim.
+
+Planned persistence boundary:
+
+```text
+recommendation_id
+evaluation_window/version
+        ↓
+deterministic outcome key
+        ↓
+unique persisted outcome
+```
+
+Preview and materialization will remain separate, following the same pattern as Phase 8.0 recommendations.
+
+---
+
+# Future platform architecture
+
+Phase 8.3–8.5 will add effectiveness aggregation, policy replay/evaluation, and shadow-mode policy experiments.
+
+Phase 9 will focus on production/platform concerns:
+
+```text
+FleetMind intelligence
+        │
+        ├── OpenTelemetry / Prometheus / Grafana
+        ├── explicit SLOs
+        ├── stream/backpressure/load testing
+        ├── scalable historical data layer
+        ├── Kubernetes / Helm deployment
+        ├── model registry / promotion
+        └── multi-asset reliability plugins
+```
+
+The long-term architecture should support EVs, robots, chargers, and energy systems without weakening the evidence and human-control boundaries established in the current system.

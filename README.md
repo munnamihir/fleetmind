@@ -1,14 +1,75 @@
 # FleetMind
 
-> **Detect failures before fault codes do.**
+> **Detect failures before fault codes do — then turn evidence into human-controlled fleet decisions.**
 
-FleetMind is an open-source reliability-intelligence platform for physical fleets: EVs, robots, chargers, energy systems and industrial machines. The first vertical is a synthetic EV fleet with an intentionally hidden coolant-pump degradation scenario.
+FleetMind is an open-source reliability-intelligence and fleet-operations platform for physical fleets: EVs, robots, chargers, energy systems, and industrial machines. The first vertical is a synthetic EV fleet with intentionally hidden coolant-pump degradation and firmware-interaction scenarios.
 
-The system streams vehicle telemetry through Kafka-compatible Redpanda, detects multi-signal degradation, persists engineering evidence, identifies risky component cohorts and exposes the results through a live reliability console.
+FleetMind streams observable vehicle telemetry through Kafka-compatible Redpanda, persists engineering evidence in PostgreSQL, evaluates reliability and predictive-maintenance models, builds diagnostic timelines and cases, derives fleet-level operational intelligence, and exposes the result through a React engineering console.
+
+The project deliberately separates **observable evidence**, **private synthetic failure truth**, **model outputs**, **workflow state**, and **human decisions** so the UI can be useful without overstating causality.
+
+## Current status
+
+**Current milestone: Phase 8.1 complete — Fleet Command, decision-queue ownership, closed-loop recommendation materialization, and dashboard navigation/polling hardening.**
+
+The current end-to-end stack is:
+
+```text
+Synthetic EV Fleet
+      │
+      ├── observable telemetry
+      │
+      └── private failure truth (evaluation only)
+      ▼
+Redpanda / Kafka
+      ▼
+Risk + persistence worker
+      ▼
+PostgreSQL
+      ├── telemetry / alerts / failure truth
+      ├── model runs / predictions / benchmark lineage
+      ├── diagnostic events / episodes / cases
+      ├── maintenance / automation / fleet decision state
+      └── closed-loop recommendations / audit activity
+      ▼
+FastAPI
+      ▼
+React Engineering Console
+      ├── Fleet Overview
+      ├── Incidents
+      ├── Reliability
+      ├── Cohorts
+      ├── Components
+      ├── Firmware
+      ├── Predictive ML
+      └── Root Cause
+            └── Fleet Command
+                  ├── Command Center
+                  ├── Explainability
+                  ├── Decision Queue
+                  └── Closed Loop
+```
+
+### Recently completed
+
+- Phase 8.0 closed-loop operations foundation
+- Phase 8.1 decision-queue ownership and human-controlled workflow transitions
+- Deterministic recommendation materialization with database uniqueness
+- Application-level idempotency plus concurrent insert race protection with savepoints
+- Explicit recommendation audit activity
+- Selected-vehicle-only persistent materialization
+- Human approval and execution gates
+- Fleet Command evidence explainability and attention decomposition
+- Nested tabs across all left-navigation dashboards
+- Nested views inside Fleet Command
+- Active-page polling: inactive left-side pages no longer fetch continuously
+- Lazy mounting of heavy Root Cause modules
+- Active-workspace polling inside Fleet Command
+- QueuePool exhaustion fixed at the source instead of increasing database pool limits
 
 ## What makes the demo different
 
-The simulator **does not publish a failure label**. A latent CP-17 coolant-pump defect changes observable physics over time:
+The simulator **does not publish a failure label** in normal telemetry. A latent coolant-pump defect changes observable physics over time:
 
 ```text
 pump current ↑
@@ -22,50 +83,183 @@ battery temperature ↑
 eventual fault
 ```
 
-FleetMind must infer the problem from telemetry.
+FleetMind must infer degradation from telemetry and only uses the private failure stream for controlled evaluation.
 
-## Current milestone: Phase 5.2.2 predictive-maintenance split hardening
+The same truth boundary carries through later phases:
 
 ```text
-Synthetic fleet ─► Redpanda/Kafka ─► Risk worker ─► PostgreSQL ─► FastAPI ─► React console
+observable evidence
+      ↓
+model / deterministic analysis
+      ↓
+diagnostic hypothesis
+      ↓
+human-controlled workflow recommendation
 ```
 
-### Included now
+FleetMind does **not** equate:
+
+- attention score with physical failure probability
+- workflow lineage with physical causality
+- recommendation execution with physical repair
+- post-workflow change with proof that maintenance caused recovery
+
+## Capability map
+
+### 1. Streaming fleet telemetry
 
 - Synthetic multi-vehicle EV telemetry
-- Hidden component degradation influenced by mileage and heat
-- Firmware, factory and component-revision metadata
-- Kafka-compatible streaming
-- Explainable multi-signal anomaly score
-- Live alert generation
-- Fleet-health summary
-- Component cohort comparison
-- Vehicle telemetry history API
-- Dark engineering-focused dashboard
-- Docker Compose local environment with automatic Kafka topic initialization
-- Private ground-truth component failure stream for evaluation only
-- Right-censored two-parameter Weibull reliability fitting
-- B10/B50 and characteristic-life estimates
+- Firmware, factory, model, mileage, environment, and component-revision metadata
+- Hidden degradation scenarios
+- Kafka-compatible Redpanda event transport
+- PostgreSQL persistence
+- Docker Compose local environment
+- Experiment identity and simulator reset/epoch handling
+
+### 2. Reliability science
+
+- Private ground-truth failure stream for evaluation only
+- Right-censored two-parameter Weibull fitting
+- B10/B50 and characteristic life
 - Kaplan-Meier survival curves
-- Early-warning detection rate and lead-time/mileage metrics
-- Firmware treatment/control cohort comparison
-- Coarsened exact matching by component revision, mileage band and environment
-- Cochran–Mantel–Haenszel significance testing and effect-size estimates
+- Early-warning detection rate
+- Lead-mileage and accelerated-time metrics
+- Pump-revision reliability comparison
+- Failure and warning drill-down
+
+### 3. Firmware regression intelligence
+
+- Treatment/control firmware comparison
+- Coarsened exact matching by hardware, mileage, and environment
+- Risk ratios, intervals, absolute risk increase
+- Cochran-Mantel-Haenszel association testing
 - Hardware × firmware interaction analysis
-- Firmware Regression Lab dashboard
-- Rolling telemetry feature windows with right-censoring protection
-- Sensor-only XGBoost predictive-maintenance baseline
-- Vehicle-isolated, late-life held-out evaluation
-- Validation-derived alert threshold targeting ~2% false-positive rate
-- Optional Platt probability calibration when validation support is sufficient
-- ROC-AUC, PR-AUC, precision/recall/F1, Brier score and confusion matrix
-- ML early-warning lead-distance evaluation
-- Persisted model runs, feature importance and live vehicle predictions
-- Predictive Maintenance ML dashboard
+- Regression classification
+- Firmware engineering console
 
-## Run
+### 4. Predictive Maintenance ML
 
-Requirements: Docker Desktop + Docker Compose.
+- Rolling telemetry feature windows
+- Prospective future-horizon labels
+- Right-censoring protection
+- Sensor-only XGBoost classifier
+- Logistic-regression baseline
+- Vehicle-isolated deterministic development/benchmark splits
+- Validation-derived operational threshold
+- Optional Platt calibration when supported
+- ROC-AUC, PR-AUC, precision, recall, F1, Brier score
+- Confusion matrix and calibration views
+- Early-warning lead-distance evaluation
+- Persisted model runs and predictions
+- Frozen benchmark snapshot after evidence qualification
+- SHA-256 dataset and feature-schema integrity
+- Model-lineage-aware longitudinal prediction history
+- Experiment-epoch continuity guards
+
+### 5. Diagnostic and Root Cause Intelligence
+
+FleetMind now extends beyond one risk score into a layered diagnostic workflow:
+
+- Diagnostic event generation with anti-chatter behavior
+- Event transitions
+- Temporal diagnostic episodes
+- Diagnostic cases and workflow status
+- Replay and extended replay
+- Evidence-backed hypothesis ranking
+- Cross-case pattern intelligence
+- Similar-case lookup
+- Watchlists and saved investigation views
+- Prognostic trajectory analysis
+- Experimental model-confidence horizons
+- Maintenance planning workflow
+- Operational automation with explicit approval
+- Fleet-level decision intelligence
+- Vehicle operational digital twin
+- Fleet capacity/planning intelligence
+- Fleet change snapshots and comparisons
+- Workflow-effectiveness analysis
+
+### 6. Fleet Command & Closed Loop
+
+Fleet Command turns the diagnostic stack into an operator workspace while preserving human control.
+
+Current workspaces:
+
+```text
+Command Center
+  ├── Overview
+  ├── Operator Queues
+  ├── Cohorts
+  └── Attention Factors
+
+Explainability
+  ├── Overview
+  ├── Attention
+  ├── Evidence
+  └── Lineage
+
+Decision Queue
+  ├── Overview
+  ├── Active Queue
+  ├── Ownership
+  └── Workflow Status
+
+Closed Loop
+  ├── Evaluate
+  ├── Evaluation Results
+  ├── Recommendations
+  └── Lifecycle
+```
+
+Closed-loop recommendation lifecycle:
+
+```text
+PROPOSED
+   ↓
+ACKNOWLEDGED
+   ↓
+APPROVAL_REQUIRED
+   ↓
+APPROVED
+   ↓
+EXECUTION_READY
+   ↓
+EXECUTED
+```
+
+Persistent materialization is intentionally restricted to the explicitly selected vehicle. Preview evaluation can inspect the wider selected run without writing recommendations.
+
+The lifecycle controls workflow metadata only. It does not send a physical vehicle command and does not prove that physical maintenance occurred.
+
+## Dashboard navigation
+
+The React console uses two navigation levels.
+
+### Left navigation
+
+- Fleet Overview
+- Incidents
+- Reliability
+- Cohorts
+- Components
+- Firmware
+- Predictive ML
+- Root Cause
+
+### Page-level nested tabs
+
+Each major page now exposes its component groups as internal tabs instead of stacking every panel vertically. Root Cause uses a horizontally scrollable tab row for its larger intelligence set.
+
+Heavy Root Cause modules are mounted only when their tab is active. This prevents hidden components from continuing their polling loops.
+
+`App.tsx` also fetches only the data required by the active left-side page. Fleet Command polls only its active workspace. This avoids the database connection fan-out that previously produced SQLAlchemy `QueuePool` timeout bursts.
+
+## Run locally
+
+Requirements:
+
+- Docker Desktop
+- Docker Compose
 
 ```bash
 cp .env.example .env
@@ -78,7 +272,7 @@ Open:
 - FastAPI docs: `http://localhost:8000/docs`
 - API health: `http://localhost:8000/health`
 
-The default simulation produces 500 vehicles and ~120 telemetry events/sec. Change those in `.env`:
+The default simulation can be scaled through `.env`:
 
 ```text
 SIMULATED_VEHICLES=5000
@@ -86,34 +280,99 @@ SIM_EVENTS_PER_SECOND=1000
 SIM_TIME_ACCELERATION=600
 ```
 
-## Demo storyline
+## Useful verification
 
-1. Start the stack.
-2. Watch telemetry event count rise.
-3. Healthy CP-15/CP-16 vehicles establish a baseline.
-4. CP-17 vehicles operating under higher heat/mileage begin showing pump-current and RPM drift.
-5. FleetMind raises explainable anomaly alerts.
-6. The component cohort panel surfaces CP-17 as the higher-risk population.
-7. Drill into a vehicle using `GET /api/v1/vehicles/{vehicle_id}` to inspect its recent telemetry history.
+Basic service state:
 
-## APIs
+```bash
+docker compose ps
+```
+
+Recent API failures:
+
+```bash
+docker compose logs api --since=5m \
+  | grep -E 'QueuePool|TimeoutError|500 Internal'
+```
+
+Core Fleet Command contracts:
+
+```bash
+PYTHONPATH=services/common \
+python3 -m unittest discover \
+  -s tests \
+  -p 'test_fleet_command_closed_loop.py' \
+  -v
+```
+
+Closed-loop concurrency contract:
+
+```bash
+PYTHONPATH=services/common \
+python3 -m unittest discover \
+  -s tests \
+  -p 'test_closed_loop_materialization_concurrency.py' \
+  -v
+```
+
+Nested dashboard behavior:
+
+```bash
+python3 -m unittest discover \
+  -s tests \
+  -p 'test_nested_tabs_active_polling.py' \
+  -v
+```
+
+## API families
+
+FleetMind exposes more endpoints than the short list below; use FastAPI `/docs` for the complete live contract.
+
+### Fleet / reliability / firmware
 
 ```text
 GET /health
 GET /api/v1/fleet/summary
-GET /api/v1/alerts?limit=20
+GET /api/v1/alerts
 GET /api/v1/vehicles/{vehicle_id}
 GET /api/v1/cohorts/pump-revisions
 GET /api/v1/reliability/pump-revisions
-GET /api/v1/reliability/failures?limit=50
+GET /api/v1/reliability/failures
 GET /api/v1/firmware/overview
-GET /api/v1/firmware/regression?target=2026.32.4&control=2026.32.1
+GET /api/v1/firmware/regression
+```
+
+### Predictive ML
+
+```text
 GET /api/v1/ml/status
 GET /api/v1/ml/benchmark
-GET /api/v1/ml/predictions?limit=25
+GET /api/v1/ml/predictions
 GET /api/v1/ml/vehicles/{vehicle_id}
-GET /api/v1/ml/vehicles/{vehicle_id}/history?limit=60
-GET /api/v1/ml/vehicles/{vehicle_id}/history?limit=60&includeLegacy=true  # audit only
+GET /api/v1/ml/vehicles/{vehicle_id}/history
+```
+
+### Diagnostics and fleet intelligence
+
+Representative families include:
+
+```text
+/api/v1/diagnostics/status
+/api/v1/diagnostics/events
+/api/v1/diagnostics/episodes
+/api/v1/diagnostics/cases
+/api/v1/diagnostics/patterns
+/api/v1/diagnostics/prognostics
+/api/v1/diagnostics/maintenance
+/api/v1/diagnostics/automation
+/api/v1/diagnostics/fleet-intelligence
+/api/v1/diagnostics/twins
+/api/v1/diagnostics/fleet-twin
+/api/v1/diagnostics/workflow-effectiveness
+/api/v1/diagnostics/fleet-command
+/api/v1/diagnostics/explainability
+/api/v1/diagnostics/decision-queue
+/api/v1/diagnostics/closed-loop
 ```
 
 ## Repository
@@ -121,87 +380,72 @@ GET /api/v1/ml/vehicles/{vehicle_id}/history?limit=60&includeLegacy=true  # audi
 ```text
 fleetmind/
 ├── docker-compose.yml
+├── README.md
 ├── ROADMAP.md
 ├── docs/
 │   └── ARCHITECTURE.md
 ├── services/
 │   ├── common/fleetmind_common/
-│   │   ├── config.py
-│   │   ├── db.py
-│   │   ├── models.py
-│   │   ├── reliability.py
-│   │   ├── firmware.py
-│   │   ├── ml_features.py
 │   │   ├── benchmark_snapshot.py
-│   │   └── risk.py
+│   │   ├── capacity_planning_rules.py
+│   │   ├── closed_loop_rules.py
+│   │   ├── decision_queue_rules.py
+│   │   ├── diagnostic_*_rules.py
+│   │   ├── diagnostic_store.py
+│   │   ├── evidence_explainability_rules.py
+│   │   ├── firmware.py
+│   │   ├── fleet_*_rules.py
+│   │   ├── ml_features.py
+│   │   ├── reliability.py
+│   │   ├── vehicle_twin_rules.py
+│   │   └── workflow_effectiveness_rules.py
 │   ├── api/
 │   ├── worker/
 │   ├── simulator/
 │   └── ml/
 ├── web/
 │   └── src/
+│       ├── App.tsx
+│       ├── DashboardPageTabs.tsx
+│       ├── RootCauseDashboard.tsx
+│       ├── FleetCommandOperations.tsx
+│       └── intelligence modules...
 └── tests/
 ```
 
-## Risk engine v1
+## Current engineering boundary
 
-The current risk model is intentionally transparent. It combines evidence from:
+FleetMind is a synthetic engineering platform and portfolio system. Its statistical and ML outputs should be read in that context.
 
-- Coolant-pump current
-- Coolant-pump RPM
-- Coolant temperature
-- Battery temperature
-- Cell-voltage imbalance
-- Inverter temperature
+The strongest claims the platform currently supports are about:
 
-This is a baseline, not the final ML model. The roadmap moves from explainable rules to evaluated classifiers, survival analysis and remaining-useful-life estimation while retaining evidence traces.
+- observed telemetry
+- synthetic failure evaluation
+- benchmarked model behavior
+- deterministic workflow state
+- reproducible evidence lineage
+- operator-controlled recommendation lifecycle
 
-## Reliability science v0.2
+It should not make unsupported claims about:
 
-The simulator publishes observable telemetry and private evaluation truth to separate Kafka topics. The worker stores the truth only in `failure_events`; it is never part of the telemetry contract used by the risk engine.
+- real Tesla vehicles or proprietary Tesla data
+- physical causality from correlation alone
+- calibrated physical remaining useful life unless explicitly implemented and validated
+- physical repair completion from workflow execution
+- failure prevention from a recommendation being executed
 
-For each pump revision, FleetMind treats failed vehicles as observed lifetimes and healthy vehicles as right-censored lifetimes. The API fits a two-parameter Weibull distribution, returns β/η/B10/B50, generates a Kaplan-Meier curve, and measures how far before failure the first degraded/critical telemetry signal appeared.
+## What comes next
 
-`SIM_TIME_ACCELERATION=600` means one wall-clock second represents 600 seconds of accelerated fleet operation so useful field-life statistics emerge during a short local demo.
+The planned next sequence is:
 
-## Firmware regression intelligence v0.3
+```text
+Phase 8.2  Closed-Loop Outcome Verification
+Phase 8.3  Closed-Loop Effectiveness Analytics
+Phase 8.4  Recommendation Policy Evaluation
+Phase 8.5  Shadow-Mode Policy Experimentation
+Phase 9.0  Fleet Reliability Intelligence Platform
+```
 
-Phase 4 adds a synthetic OTA regression scenario affecting CP-17 coolant pumps on firmware `2026.32.4`. The failure cause remains private simulator truth; the analysis layer only sees ordinary firmware metadata, telemetry and observed failure events.
-
-FleetMind compares `2026.32.4` against `2026.32.1` using coarsened exact matching on component revision, 40k-mile odometer band and ambient-temperature band. It reports raw matched failure rates, risk ratio with a 95% interval, absolute risk increase, a Mantel-Haenszel common odds ratio, Cochran-Mantel-Haenszel significance, supportive telemetry deltas, and hardware × firmware interactions.
-
-The simulator intentionally uses a larger CP-17 cohort in this demo milestone so a 500-vehicle local run can accumulate enough failures to exercise the statistical workflow. Treat all results as synthetic experiment output, not real Tesla data.
-
-## Predictive maintenance ML v0.6
-
-Phase 5.2 predicts whether a coolant-pump failure will occur within the next `ML_FAILURE_HORIZON_MILES` (2,500 miles by default) from rolling telemetry windows while separating operational scoring from benchmark claims. The fitted models are intentionally denied FleetMind's rule-engine outputs: `risk_score`, `status`, alerts, fault codes, vehicle identity and failure-event fields are not model inputs. Firmware/revision/factory/model remain available as display context but are excluded from fit.
-
-Training examples are prospective. Features use telemetry at or before the window anchor; the label asks whether the private failure event occurs after the anchor and within the future mileage horizon. Healthy-looking windows without enough future observed mileage are treated as right-censored and dropped instead of being mislabeled as negatives.
-
-The benchmark cohort is frozen by a deterministic SHA-256 hash of `vehicle_id` using a fixed seed. Membership is label-agnostic, so a vehicle cannot enter or leave the benchmark when it later fails. Benchmark vehicles are never used for model fitting, Platt calibration or threshold selection. The operating threshold still comes only from validation negatives, targeting roughly a 2% validation false-positive rate.
-
-Every complete run evaluates both sensor-only XGBoost and a sensor-only logistic-regression baseline on the exact same frozen benchmark. FleetMind reports ROC-AUC, PR-AUC, precision, recall, F1, Brier score, confusion matrices, calibration, early-warning lead mileage and XGBoost-vs-baseline deltas. A benchmark qualification gate blocks headline claims until the frozen cohort has at least 1,000 eligible windows, 20 positive windows, 8 distinct failure vehicles and both classes. Operational live predictions continue even if the benchmark is not yet qualified.
-
-Historical `ml_predictions` rows are retained intentionally and exposed through the vehicle-history API so the dashboard can visualize longitudinal risk instead of treating older model-run predictions as duplicates. Serialized XGBoost and logistic-regression artifacts are stored in the ML Docker volume.
-
-
-### Phase 5.2 benchmark lineage and experiment continuity
-
-Phase 5.2 turns the frozen vehicle cohort into an exact benchmark snapshot once the evidence gate first qualifies. FleetMind writes the exact feature windows, labels, anchor timestamps and metadata to a gzip JSON artifact in the ML artifact volume, records its SHA-256 and feature-schema hash in `ml_benchmark_snapshots`, and reuses that artifact for every later run in the same model lineage. If the artifact is missing, tampered with, or its feature schema no longer matches, benchmark evaluation fails closed instead of silently rebuilding a different test set. Any intentional predictive feature/protocol change should bump the model lineage.
-
-Operational history is lineage-aware. The vehicle history endpoint hides older model families by default and only connects points from the latest mileage-continuous experiment epoch. Large backward odometer jumps are treated as simulator resets, and rolling windows are never allowed to cross them. Failure truth is usable only when its timestamp and mileage belong to the active telemetry epoch and it occurs after the feature-window anchor. This prevents an old failure row from becoming future truth after a simulator restart. Use `?includeLegacy=true` only for audit/debugging; mixed-lineage history is not safe to draw as one causal trajectory.
+Phase 8.2 will add first-class post-execution observation: baseline vs post-workflow evidence, deterministic outcome classification, idempotent outcome materialization, and an Outcomes view in Fleet Command. It will describe **observed improvement/stability/worsening**, not claim that a workflow physically repaired a vehicle.
 
 See [ROADMAP.md](ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Design goal
-
-FleetMind should feel like software an engineer uses to answer:
-
-> *What is failing, which population is affected, why do we believe it, how early did we know, and what should engineering investigate next?*
-
-
-### Phase 5.2.2 development split and failure warm-up
-
-Benchmark membership remains a deterministic, label-agnostic SHA-256 partition. Inside the non-benchmark development pool, train/validation assignment is now deterministic and group-stratified by causal failure support. This keeps every vehicle in exactly one development partition while preventing calibration from being permanently blocked when all observed development failures happen to hash into train. The benchmark itself remains untouched by this stratification.
-
-The simulator also requires at least 3,000 miles of observation in the current experiment epoch before emitting a coolant-pump failure. This guarantees sufficient pre-failure telemetry for the 12-sample rolling feature window and avoids benchmark failures that occur before any causal feature window can exist. Exact/replayed duplicate failure events at the same mileage are ignored by the worker.
