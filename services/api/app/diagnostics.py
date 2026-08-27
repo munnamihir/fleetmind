@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from fleetmind_common.db import SessionLocal
@@ -82,6 +83,8 @@ from fleetmind_common.diagnostic_store import (
     DiagnosticEpisode,
     DiagnosticEvent,
     DiagnosticFleetDecisionSnapshot,
+    DiagnosticOperationalRecommendation,
+    DiagnosticOperationalRecommendationActivity,
     DiagnosticModelRun,
     DiagnosticPrediction,
     DiagnosticReplayPoint,
@@ -129,6 +132,47 @@ from fleetmind_common.fleet_decision_rules import (
     apply_workflow_scenario,
     derive_fleet_decision,
     summarize_fleet_records,
+)
+from fleetmind_common.fleet_command_rules import (
+    FLEET_COMMAND_QUEUES,
+    FLEET_COMMAND_RULES_VERSION,
+    command_center_summary,
+    command_queue_rows,
+    command_vehicle_rows,
+    queue_match,
+)
+from fleetmind_common.evidence_explainability_rules import (
+    EVIDENCE_EXPLAINABILITY_RULES_VERSION,
+    attention_score_decomposition,
+    evidence_inventory,
+    evidence_lineage,
+    summarize_attention_explanations,
+)
+from fleetmind_common.closed_loop_rules import (
+    CLOSED_LOOP_PRIORITIES,
+    CLOSED_LOOP_RECOMMENDATION_TYPES,
+    CLOSED_LOOP_RULES_VERSION,
+    CLOSED_LOOP_STATES,
+    STATE_ACKNOWLEDGED,
+    STATE_APPROVAL_REQUIRED,
+    STATE_APPROVED,
+    STATE_CANCELLED,
+    STATE_EXECUTED,
+    STATE_EXECUTION_READY,
+    STATE_PROPOSED,
+    STATE_REJECTED,
+    STATE_SUPERSEDED,
+    allowed_next_states,
+    recommendation_candidates,
+    recommendation_key,
+    require_transition,
+    summarize_recommendation_candidates,
+)
+from fleetmind_common.decision_queue_rules import (
+    DECISION_QUEUE_RULES_VERSION,
+    assignment_allowed,
+    decision_queue_rows,
+    decision_queue_summary,
 )
 from fleetmind_common.models import Telemetry
 
@@ -7005,3 +7049,3033 @@ def diagnostics_summary(
         ),
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
+
+
+
+# Phase 7.6 — Evidence & Explainability Center
+#
+# This layer explains FleetMind's own deterministic operational scoring and
+# persisted evidence/workflow lineage. It is not SHAP, model feature
+# attribution, causal attribution, physical failure truth, a physical
+# dependency graph, calibrated risk, or physical RUL.
+
+
+def _explainability_scope_policy() -> dict:
+    return {
+        "selectedRunOnly": True,
+        "defaultRunSelection": (
+            "latest_persisted_trained_run"
+        ),
+        "activeTelemetryExperimentRequired": False,
+        "exactExperimentOnly": True,
+        "scoringContextBoundedToPredictionAnchor": True,
+        "postRunTelemetryUsed": False,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "shapValues": False,
+        "modelFeatureAttribution": False,
+        "causalAttribution": False,
+        "causalGraph": False,
+        "physicalRiskScore": False,
+        "physicalFailureProbability": False,
+        "physicalConditionProof": False,
+        "physicalRul": False,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+        "writes": False,
+    }
+
+
+def _explainability_attention_record_from_twin(
+    twin: dict,
+) -> dict:
+    """Project a Vehicle Twin into canonical Phase 7.0 score inputs."""
+
+    model = twin.get("modelState") or {}
+    diagnostic = twin.get("diagnosticState") or {}
+    case = twin.get("caseState") or {}
+    prognostic = twin.get("prognosticState") or {}
+    maintenance = twin.get("maintenanceState") or {}
+    automation = twin.get("automationState") or {}
+
+    return {
+        "topClass": model.get("topClass"),
+        "topConfidence": model.get("topConfidence"),
+        "episodeState": diagnostic.get(
+            "episodeState"
+        ),
+        "caseId": case.get("caseId"),
+        "caseStatus": case.get("status"),
+        "reviewPriority": case.get(
+            "reviewPriority"
+        ),
+        "assignedTo": case.get("assignedTo"),
+        "watchlisted": bool(
+            case.get("watchlisted")
+        ),
+        "maintenanceTier": prognostic.get(
+            "maintenanceTier"
+        ),
+        "trajectoryEligible": prognostic.get(
+            "trajectoryEligible"
+        ),
+        "maintenancePlanState": maintenance.get(
+            "state"
+        ),
+        "automationStatuses": list(
+            automation.get("statuses") or []
+        ),
+        "pendingActionTypes": list(
+            automation.get(
+                "pendingActionTypes"
+            )
+            or []
+        ),
+    }
+
+
+def _explainability_vehicle_payload(
+    twin: dict,
+) -> dict:
+    attention = attention_score_decomposition(
+        _explainability_attention_record_from_twin(
+            twin
+        )
+    )
+
+    return {
+        "vehicleId": twin.get("vehicleId"),
+        "attention": attention,
+        "evidenceInventory": evidence_inventory(
+            twin
+        ),
+        "lineage": evidence_lineage(twin),
+        "observableModelEvidence": list(
+            (
+                twin.get("modelState") or {}
+            ).get("observableEvidence")
+            or []
+        ),
+        "sourceVersions": dict(
+            twin.get("sourceVersions") or {}
+        ),
+    }
+
+
+@router.get("/explainability/summary")
+def explainability_summary(
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = (
+        _current_fleet_twin_records(
+            db,
+            run_id=run_id,
+        )
+    )
+
+    summary = summarize_attention_explanations(
+        records
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        **summary,
+        "scopePolicy": (
+            _explainability_scope_policy()
+        ),
+        "interpretationPolicy": (
+            "Explains FleetMind's deterministic "
+            "operational-attention scoring and "
+            "evidence representation. Factors are "
+            "not SHAP values, model feature "
+            "attribution, causal evidence, physical "
+            "failure probability, physical condition "
+            "proof, or physical RUL."
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get("/explainability/vehicles")
+def explainability_vehicles(
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=500,
+    ),
+    decision_state: str | None = Query(
+        default=None,
+    ),
+    min_attention: float = Query(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+    ),
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    if (
+        decision_state is not None
+        and decision_state not in DECISION_STATES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported decision state"
+                ),
+                "allowed": list(
+                    DECISION_STATES
+                ),
+            },
+        )
+
+    experiment_id, run, records = (
+        _current_fleet_twin_records(
+            db,
+            run_id=run_id,
+        )
+    )
+
+    rows = []
+
+    for record in records:
+        if (
+            decision_state is not None
+            and record.get("decisionState")
+            != decision_state
+        ):
+            continue
+
+        explanation = (
+            attention_score_decomposition(
+                record
+            )
+        )
+
+        if (
+            float(
+                explanation.get(
+                    "attentionScore"
+                )
+                or 0.0
+            )
+            < min_attention
+        ):
+            continue
+
+        positive_components = [
+            component
+            for component
+            in explanation["components"]
+            if float(
+                component.get(
+                    "contribution"
+                )
+                or 0.0
+            )
+            > 0.0
+        ]
+
+        positive_components.sort(
+            key=lambda component: (
+                float(
+                    component.get(
+                        "contribution"
+                    )
+                    or 0.0
+                ),
+                str(
+                    component.get(
+                        "factor"
+                    )
+                    or ""
+                ),
+            ),
+            reverse=True,
+        )
+
+        rows.append(
+            {
+                "vehicleId": record.get(
+                    "vehicleId"
+                ),
+                "topClass": record.get(
+                    "topClass"
+                ),
+                "topConfidence": record.get(
+                    "topConfidence"
+                ),
+                "decisionState": record.get(
+                    "decisionState"
+                ),
+                "attentionScore": (
+                    explanation[
+                        "attentionScore"
+                    ]
+                ),
+                "rawAttentionScore": (
+                    explanation[
+                        "rawAttentionScore"
+                    ]
+                ),
+                "capApplied": explanation[
+                    "capApplied"
+                ],
+                "reconciles": explanation[
+                    "reconciles"
+                ],
+                "coverageGaps": list(
+                    explanation[
+                        "coverageGaps"
+                    ]
+                ),
+                "componentCount": len(
+                    explanation["components"]
+                ),
+                "topFactors": (
+                    positive_components[:3]
+                ),
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            float(
+                row.get(
+                    "attentionScore"
+                )
+                or 0.0
+            ),
+            float(
+                row.get(
+                    "topConfidence"
+                )
+                or 0.0
+            ),
+            str(
+                row.get("vehicleId")
+                or ""
+            ),
+        ),
+        reverse=True,
+    )
+
+    selected = rows[:limit]
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            EVIDENCE_EXPLAINABILITY_RULES_VERSION
+        ),
+        "totalMatched": len(rows),
+        "returned": len(selected),
+        "vehicles": selected,
+        "scopePolicy": (
+            _explainability_scope_policy()
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get(
+    "/explainability/vehicles/{vehicle_id}"
+)
+def explainability_vehicle_detail(
+    vehicle_id: str,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    _, selected_run = (
+        _resolve_vehicle_twin_run(
+            db,
+            run_id,
+        )
+    )
+
+    experiment_id, run, twin = (
+        _current_vehicle_twin_record(
+            db,
+            vehicle_id,
+            selected_run=selected_run,
+        )
+    )
+
+    payload = _explainability_vehicle_payload(
+        twin
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            EVIDENCE_EXPLAINABILITY_RULES_VERSION
+        ),
+        **payload,
+        "scopePolicy": (
+            _explainability_scope_policy()
+        ),
+        "interpretationPolicy": (
+            "Unified selected-run operational "
+            "explanation. Evidence presence and "
+            "workflow lineage do not establish "
+            "physical causality or component "
+            "condition."
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get(
+    "/explainability/vehicles/{vehicle_id}/attention"
+)
+def explainability_vehicle_attention(
+    vehicle_id: str,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    _, selected_run = (
+        _resolve_vehicle_twin_run(
+            db,
+            run_id,
+        )
+    )
+
+    experiment_id, run, twin = (
+        _current_vehicle_twin_record(
+            db,
+            vehicle_id,
+            selected_run=selected_run,
+        )
+    )
+
+    explanation = (
+        attention_score_decomposition(
+            _explainability_attention_record_from_twin(
+                twin
+            )
+        )
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "vehicleId": vehicle_id,
+        **explanation,
+        "scopePolicy": (
+            _explainability_scope_policy()
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get(
+    "/explainability/vehicles/{vehicle_id}/lineage"
+)
+def explainability_vehicle_lineage(
+    vehicle_id: str,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    _, selected_run = (
+        _resolve_vehicle_twin_run(
+            db,
+            run_id,
+        )
+    )
+
+    experiment_id, run, twin = (
+        _current_vehicle_twin_record(
+            db,
+            vehicle_id,
+            selected_run=selected_run,
+        )
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "vehicleId": vehicle_id,
+        "rulesVersion": (
+            EVIDENCE_EXPLAINABILITY_RULES_VERSION
+        ),
+        "evidenceInventory": (
+            evidence_inventory(twin)
+        ),
+        "evidenceLineage": (
+            evidence_lineage(twin)
+        ),
+        "scopePolicy": (
+            _explainability_scope_policy()
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+
+# Phase 7.7 — Fleet Command Center
+#
+# The command center composes selected-run operational intelligence from
+# existing FleetMind layers. Queue rank is workflow prioritization only.
+# It is not calibrated physical risk, safety probability, component-condition
+# proof, causal attribution, physical RUL, or technician-hour estimation.
+
+
+FLEET_COMMAND_COHORT_DIMENSIONS = (
+    "model",
+    "factory",
+    "firmware",
+    "pumpRevision",
+    "hypothesisClass",
+)
+
+
+def _fleet_command_scope_policy() -> dict:
+    return {
+        "selectedRunOnly": True,
+        "defaultRunSelection": (
+            "latest_persisted_trained_run"
+        ),
+        "activeTelemetryExperimentRequired": False,
+        "exactExperimentOnly": True,
+        "scoringContextBoundedToPredictionAnchor": True,
+        "postRunTelemetryUsed": False,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "queuePriorityIsPhysicalRisk": False,
+        "physicalFailureProbability": False,
+        "physicalSafetyProbability": False,
+        "physicalConditionProof": False,
+        "physicalRul": False,
+        "causalAttribution": False,
+        "technicianHours": False,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+        "writes": False,
+    }
+
+
+def _fleet_command_workflow_rollup(
+    db: Session,
+    *,
+    run_id: int,
+) -> dict:
+    """Reuse the canonical Phase 7.5 effectiveness endpoint logic."""
+
+    payload = workflow_effectiveness_summary(
+        run_id=run_id,
+        db=db,
+    )
+
+    return {
+        "rulesVersion": payload.get(
+            "rulesVersion"
+        ),
+        "totalPolicies": payload.get(
+            "totalPolicies"
+        ),
+        "totalActions": payload.get(
+            "totalActions"
+        ),
+        "pendingApproval": payload.get(
+            "pendingApproval"
+        ),
+        "approvedReady": payload.get(
+            "approvedReady"
+        ),
+        "rejected": payload.get(
+            "rejected"
+        ),
+        "executed": payload.get(
+            "executed"
+        ),
+        "everApproved": payload.get(
+            "everApproved"
+        ),
+        "currentMatches": payload.get(
+            "currentMatches"
+        ),
+    }
+
+
+@router.get("/fleet-command/summary")
+def fleet_command_summary(
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = (
+        _current_fleet_twin_records(
+            db,
+            run_id=run_id,
+        )
+    )
+
+    command = command_center_summary(
+        records
+    )
+
+    explanation = (
+        summarize_attention_explanations(
+            records
+        )
+    )
+
+    workflow = (
+        _fleet_command_workflow_rollup(
+            db,
+            run_id=run.id,
+        )
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        **command,
+        "workflow": workflow,
+        "attentionExplanation": {
+            "rulesVersion": explanation.get(
+                "rulesVersion"
+            ),
+            "reconciledVehicleCount": (
+                explanation.get(
+                    "reconciledVehicleCount"
+                )
+            ),
+            "cappedVehicleCount": (
+                explanation.get(
+                    "cappedVehicleCount"
+                )
+            ),
+            "topFactors": list(
+                explanation.get("factors")
+                or []
+            )[:10],
+        },
+        "scopePolicy": (
+            _fleet_command_scope_policy()
+        ),
+        "interpretationPolicy": (
+            "Fleet Command composes selected-run "
+            "operational state. Command queues and "
+            "attention ordering describe workflow "
+            "priority only, not physical failure "
+            "risk, safety probability, component "
+            "condition, causality, or physical RUL."
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get("/fleet-command/queues")
+def fleet_command_queues(
+    queue: str | None = Query(
+        default=None,
+    ),
+    limit: int = Query(
+        default=25,
+        ge=1,
+        le=500,
+    ),
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    if (
+        queue is not None
+        and queue not in FLEET_COMMAND_QUEUES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported Fleet Command queue"
+                ),
+                "allowed": list(
+                    FLEET_COMMAND_QUEUES
+                ),
+            },
+        )
+
+    experiment_id, run, records = (
+        _current_fleet_twin_records(
+            db,
+            run_id=run_id,
+        )
+    )
+
+    if queue is not None:
+        rows = command_queue_rows(
+            records,
+            queue,
+        )
+
+        return {
+            "runId": run.id,
+            "experimentId": experiment_id,
+            "lineage": run.lineage,
+            "rulesVersion": (
+                FLEET_COMMAND_RULES_VERSION
+            ),
+            "queue": queue,
+            "totalMatched": len(rows),
+            "returned": min(
+                len(rows),
+                limit,
+            ),
+            "vehicles": rows[:limit],
+            "scopePolicy": (
+                _fleet_command_scope_policy()
+            ),
+            "generatedAt": datetime.now(
+                timezone.utc
+            ).isoformat(),
+        }
+
+    queue_payloads = []
+
+    for queue_name in FLEET_COMMAND_QUEUES:
+        rows = command_queue_rows(
+            records,
+            queue_name,
+        )
+
+        queue_payloads.append(
+            {
+                "queue": queue_name,
+                "vehicles": len(rows),
+                "topVehicles": rows[
+                    : min(limit, len(rows))
+                ],
+            }
+        )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            FLEET_COMMAND_RULES_VERSION
+        ),
+        "queueCount": len(
+            FLEET_COMMAND_QUEUES
+        ),
+        "queues": queue_payloads,
+        "scopePolicy": (
+            _fleet_command_scope_policy()
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get("/fleet-command/vehicles")
+def fleet_command_vehicles(
+    queue: str | None = Query(
+        default=None,
+    ),
+    decision_state: str | None = Query(
+        default=None,
+    ),
+    min_attention: float = Query(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+    ),
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=500,
+    ),
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    if (
+        queue is not None
+        and queue not in FLEET_COMMAND_QUEUES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported Fleet Command queue"
+                ),
+                "allowed": list(
+                    FLEET_COMMAND_QUEUES
+                ),
+            },
+        )
+
+    if (
+        decision_state is not None
+        and decision_state not in DECISION_STATES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported decision state"
+                ),
+                "allowed": list(
+                    DECISION_STATES
+                ),
+            },
+        )
+
+    experiment_id, run, records = (
+        _current_fleet_twin_records(
+            db,
+            run_id=run_id,
+        )
+    )
+
+    selected_records = []
+
+    for record in records:
+        if (
+            queue is not None
+            and not queue_match(
+                record,
+                queue,
+            )
+        ):
+            continue
+
+        if (
+            decision_state is not None
+            and record.get(
+                "decisionState"
+            )
+            != decision_state
+        ):
+            continue
+
+        if (
+            float(
+                record.get(
+                    "attentionScore"
+                )
+                or 0.0
+            )
+            < min_attention
+        ):
+            continue
+
+        selected_records.append(
+            record
+        )
+
+    rows = command_vehicle_rows(
+        selected_records
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            FLEET_COMMAND_RULES_VERSION
+        ),
+        "totalMatched": len(rows),
+        "returned": min(
+            len(rows),
+            limit,
+        ),
+        "vehicles": rows[:limit],
+        "scopePolicy": (
+            _fleet_command_scope_policy()
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get("/fleet-command/cohorts")
+def fleet_command_cohorts(
+    dimension: str = Query(
+        default="factory",
+    ),
+    measure: str = Query(
+        default="nonHealthy",
+    ),
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=100,
+    ),
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    if (
+        dimension
+        not in FLEET_COMMAND_COHORT_DIMENSIONS
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported Fleet Command "
+                    "cohort dimension"
+                ),
+                "allowed": list(
+                    FLEET_COMMAND_COHORT_DIMENSIONS
+                ),
+            },
+        )
+
+    if (
+        measure
+        not in FLEET_TWIN_EXPOSURE_MEASURES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported Fleet Command "
+                    "exposure measure"
+                ),
+                "allowed": list(
+                    FLEET_TWIN_EXPOSURE_MEASURES
+                ),
+            },
+        )
+
+    experiment_id, run, records = (
+        _current_fleet_twin_records(
+            db,
+            run_id=run_id,
+        )
+    )
+
+    rows = cohort_exposure_rows(
+        records,
+        dimension,
+    )
+
+    rows.sort(
+        key=lambda row: (
+            exposure_measure_rate(
+                row,
+                measure,
+            ),
+            int(
+                row.get(
+                    "populationCount"
+                )
+                or 0
+            ),
+            str(
+                row.get("value")
+                or ""
+            ),
+        ),
+        reverse=True,
+    )
+
+    selected = rows[:limit]
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            FLEET_COMMAND_RULES_VERSION
+        ),
+        "sourceExposureRulesVersion": (
+            FLEET_TWIN_RULES_VERSION
+        ),
+        "dimension": dimension,
+        "measure": measure,
+        "fleetBaseline": (
+            fleet_exposure_summary(
+                records
+            )
+        ),
+        "totalCohorts": len(rows),
+        "returnedCohorts": len(
+            selected
+        ),
+        "cohorts": selected,
+        "scopePolicy": (
+            _fleet_command_scope_policy()
+        ),
+        "interpretationPolicy": (
+            "Cohort watch uses normalized Phase "
+            "7.2 operational representation rates. "
+            "Higher representation is not greater "
+            "physical failure risk, lower reliability, "
+            "causality, or component-condition proof."
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+
+# Phase 8.0 — Closed-Loop Operations Foundation
+#
+# Recommendations are persisted workflow metadata. Their lifecycle execution
+# means the FleetMind recommendation record completed its explicitly approved
+# workflow. It does not mean physical maintenance, component replacement,
+# vehicle actuation, repair success, failure prevention, or safety clearance.
+
+
+class ClosedLoopEvaluateRequest(BaseModel):
+    actor: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+    materialize: bool = False
+    vehicleIds: list[str] | None = None
+
+
+class ClosedLoopTransitionRequest(BaseModel):
+    actor: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+    note: str | None = Field(
+        default=None,
+        max_length=2000,
+    )
+
+
+def _closed_loop_scope_policy() -> dict:
+    return {
+        "selectedRunOnly": True,
+        "activeTelemetryExperimentRequired": False,
+        "exactExperimentOnly": True,
+        "scoringContextBoundedToPredictionAnchor": True,
+        "postRunTelemetryUsed": False,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "recommendationMetadataOnly": True,
+        "automaticApproval": False,
+        "automaticExecution": False,
+        "physicalAction": False,
+        "physicalMaintenanceCommand": False,
+        "vehicleActuation": False,
+        "physicalRepairConfirmation": False,
+        "physicalFailurePreventionClaim": False,
+        "causalAttribution": False,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+    }
+
+
+def _closed_loop_source_snapshot(
+    record: dict,
+    candidate: dict,
+) -> dict:
+    """Persist bounded operational evidence used to create a recommendation."""
+
+    return {
+        "vehicleId": record.get(
+            "vehicleId"
+        ),
+        "caseId": record.get(
+            "caseId"
+        ),
+        "topClass": record.get(
+            "topClass"
+        ),
+        "topConfidence": record.get(
+            "topConfidence"
+        ),
+        "episodeState": record.get(
+            "episodeState"
+        ),
+        "caseStatus": record.get(
+            "caseStatus"
+        ),
+        "reviewPriority": record.get(
+            "reviewPriority"
+        ),
+        "assignedTo": record.get(
+            "assignedTo"
+        ),
+        "maintenanceTier": record.get(
+            "maintenanceTier"
+        ),
+        "trajectoryEligible": record.get(
+            "trajectoryEligible"
+        ),
+        "decisionState": record.get(
+            "decisionState"
+        ),
+        "attentionScore": record.get(
+            "attentionScore"
+        ),
+        "workloadUnits": record.get(
+            "workloadUnits"
+        ),
+        "coverageGaps": list(
+            record.get("coverageGaps")
+            or []
+        ),
+        "automationStatus": record.get(
+            "automationStatus"
+        ),
+        "automationStatuses": list(
+            record.get(
+                "automationStatuses"
+            )
+            or []
+        ),
+        "pendingActionTypes": list(
+            record.get(
+                "pendingActionTypes"
+            )
+            or []
+        ),
+        "scoringContextTimestamp": record.get(
+            "scoringContextTimestamp"
+        ),
+        "scoringContextMileage": record.get(
+            "scoringContextMileage"
+        ),
+        "recommendation": {
+            "recommendationType": (
+                candidate[
+                    "recommendationType"
+                ]
+            ),
+            "priority": candidate[
+                "priority"
+            ],
+            "reason": candidate[
+                "reason"
+            ],
+            "sourceKey": candidate[
+                "sourceKey"
+            ],
+        },
+    }
+
+
+def _closed_loop_recommendation_payload(
+    row: DiagnosticOperationalRecommendation,
+) -> dict:
+    return {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "vehicleId": row.vehicle_id,
+        "caseId": row.case_id,
+        "recommendationKey": (
+            row.recommendation_key
+        ),
+        "rulesVersion": row.rules_version,
+        "recommendationType": (
+            row.recommendation_type
+        ),
+        "priority": row.priority,
+        "status": row.status,
+        "approvalRequired": (
+            bool(row.approval_required)
+        ),
+        "sourceKey": row.source_key,
+        "reason": row.reason,
+        "sourceSnapshot": _json_object(
+            row.source_snapshot_json
+        ),
+        "createdAt": (
+            row.created_at.isoformat()
+        ),
+        "updatedAt": (
+            row.updated_at.isoformat()
+        ),
+        "materializedBy": (
+            row.materialized_by
+        ),
+        "lastActor": row.last_actor,
+        "assignedTo": row.assigned_to,
+        "assignedAt": (
+            row.assigned_at.isoformat() if row.assigned_at else None
+        ),
+        "acknowledgedAt": (
+            row.acknowledged_at.isoformat()
+            if row.acknowledged_at
+            else None
+        ),
+        "approvalRequiredAt": (
+            row.approval_required_at.isoformat()
+            if row.approval_required_at
+            else None
+        ),
+        "approvedAt": (
+            row.approved_at.isoformat()
+            if row.approved_at
+            else None
+        ),
+        "executionReadyAt": (
+            row.execution_ready_at.isoformat()
+            if row.execution_ready_at
+            else None
+        ),
+        "executedAt": (
+            row.executed_at.isoformat()
+            if row.executed_at
+            else None
+        ),
+        "rejectedAt": (
+            row.rejected_at.isoformat()
+            if row.rejected_at
+            else None
+        ),
+        "cancelledAt": (
+            row.cancelled_at.isoformat()
+            if row.cancelled_at
+            else None
+        ),
+        "supersededAt": (
+            row.superseded_at.isoformat()
+            if row.superseded_at
+            else None
+        ),
+    }
+
+
+def _closed_loop_activity_payload(
+    row: DiagnosticOperationalRecommendationActivity,
+) -> dict:
+    return {
+        "id": row.id,
+        "recommendationId": (
+            row.recommendation_id
+        ),
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "vehicleId": row.vehicle_id,
+        "createdAt": (
+            row.created_at.isoformat()
+        ),
+        "activityType": (
+            row.activity_type
+        ),
+        "actor": row.actor,
+        "fromState": row.from_state,
+        "toState": row.to_state,
+        "note": row.note_text,
+        "details": _json_object(
+            row.details_json
+        ),
+    }
+
+
+def _closed_loop_add_activity(
+    db: Session,
+    *,
+    recommendation: DiagnosticOperationalRecommendation,
+    activity_type: str,
+    actor: str,
+    from_state: str | None,
+    to_state: str | None,
+    note: str | None = None,
+    details: dict | None = None,
+    created_at: datetime | None = None,
+) -> DiagnosticOperationalRecommendationActivity:
+    row = DiagnosticOperationalRecommendationActivity(
+        recommendation_id=(
+            recommendation.id
+        ),
+        run_id=recommendation.run_id,
+        experiment_id=(
+            recommendation.experiment_id
+        ),
+        vehicle_id=(
+            recommendation.vehicle_id
+        ),
+        created_at=(
+            created_at
+            or datetime.now(
+                timezone.utc
+            )
+        ),
+        activity_type=activity_type,
+        actor=actor,
+        from_state=from_state,
+        to_state=to_state,
+        note_text=note,
+        details_json=json.dumps(
+            details or {},
+            sort_keys=True,
+        ),
+    )
+
+    db.add(row)
+
+    return row
+
+
+def _closed_loop_set_state_timestamp(
+    row: DiagnosticOperationalRecommendation,
+    state: str,
+    timestamp: datetime,
+) -> None:
+    if state == STATE_ACKNOWLEDGED:
+        row.acknowledged_at = timestamp
+
+    elif state == STATE_APPROVAL_REQUIRED:
+        row.approval_required_at = timestamp
+
+    elif state == STATE_APPROVED:
+        row.approved_at = timestamp
+
+    elif state == STATE_EXECUTION_READY:
+        row.execution_ready_at = timestamp
+
+    elif state == STATE_EXECUTED:
+        row.executed_at = timestamp
+
+    elif state == STATE_REJECTED:
+        row.rejected_at = timestamp
+
+    elif state == STATE_CANCELLED:
+        row.cancelled_at = timestamp
+
+    elif state == STATE_SUPERSEDED:
+        row.superseded_at = timestamp
+
+
+def _closed_loop_selected_recommendation(
+    db: Session,
+    *,
+    recommendation_id: int,
+    run_id: int | None,
+) -> tuple[
+    str,
+    DiagnosticModelRun,
+    DiagnosticOperationalRecommendation,
+]:
+    experiment_id, run = (
+        _resolve_vehicle_twin_run(
+            db,
+            run_id,
+        )
+    )
+
+    row = db.execute(
+        select(
+            DiagnosticOperationalRecommendation
+        )
+        .where(
+            DiagnosticOperationalRecommendation.id
+            == recommendation_id,
+            DiagnosticOperationalRecommendation.run_id
+            == run.id,
+            DiagnosticOperationalRecommendation.experiment_id
+            == experiment_id,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Closed-loop recommendation "
+                f"{recommendation_id} was not "
+                "found for the selected run."
+            ),
+        )
+
+    return experiment_id, run, row
+
+
+def _closed_loop_transition(
+    db: Session,
+    *,
+    recommendation: DiagnosticOperationalRecommendation,
+    target_state: str,
+    activity_type: str,
+    actor: str,
+    note: str | None,
+) -> bool:
+    """Perform exactly one permitted lifecycle transition."""
+
+    current_state = recommendation.status
+
+    if current_state == target_state:
+        return False
+
+    try:
+        require_transition(
+            current_state,
+            target_state,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
+
+    now = datetime.now(
+        timezone.utc
+    )
+
+    recommendation.status = (
+        target_state
+    )
+    recommendation.updated_at = now
+    recommendation.last_actor = actor
+
+    _closed_loop_set_state_timestamp(
+        recommendation,
+        target_state,
+        now,
+    )
+
+    _closed_loop_add_activity(
+        db,
+        recommendation=recommendation,
+        activity_type=activity_type,
+        actor=actor,
+        from_state=current_state,
+        to_state=target_state,
+        note=note,
+        created_at=now,
+        details={
+            "workflowMetadataOnly": True,
+            "physicalAction": False,
+        },
+    )
+
+    db.commit()
+    db.refresh(recommendation)
+
+    return True
+
+
+@router.post(
+    "/closed-loop/recommendations/evaluate"
+)
+def closed_loop_evaluate(
+    request: ClosedLoopEvaluateRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, records = (
+        _current_fleet_twin_records(
+            db,
+            run_id=run_id,
+        )
+    )
+
+    if request.vehicleIds:
+        requested_ids = {
+            value.strip()
+            for value
+            in request.vehicleIds
+            if value.strip()
+        }
+
+        records = [
+            record
+            for record in records
+            if str(
+                record.get(
+                    "vehicleId"
+                )
+            )
+            in requested_ids
+        ]
+
+    summary = (
+        summarize_recommendation_candidates(
+            records
+        )
+    )
+
+    prepared = []
+
+    for record in records:
+        for candidate in (
+            recommendation_candidates(
+                record
+            )
+        ):
+            key = recommendation_key(
+                run_id=run.id,
+                experiment_id=(
+                    experiment_id
+                ),
+                vehicle_id=str(
+                    record[
+                        "vehicleId"
+                    ]
+                ),
+                recommendation_type=(
+                    candidate[
+                        "recommendationType"
+                    ]
+                ),
+                case_id=(
+                    candidate.get(
+                        "caseId"
+                    )
+                ),
+                source_key=(
+                    candidate.get(
+                        "sourceKey"
+                    )
+                ),
+            )
+
+            prepared.append(
+                {
+                    "record": record,
+                    "candidate": candidate,
+                    "recommendationKey": key,
+                }
+            )
+
+    preview = [
+        {
+            **item["candidate"],
+            "recommendationKey": (
+                item[
+                    "recommendationKey"
+                ]
+            ),
+        }
+        for item in prepared
+    ]
+
+    if not request.materialize:
+        return {
+            "runId": run.id,
+            "experimentId": experiment_id,
+            "lineage": run.lineage,
+            "rulesVersion": (
+                CLOSED_LOOP_RULES_VERSION
+            ),
+            **summary,
+            "materializeRequested": False,
+            "createdCount": 0,
+            "existingCount": 0,
+            "candidates": preview,
+            "scopePolicy": (
+                _closed_loop_scope_policy()
+            ),
+            "generatedAt": datetime.now(
+                timezone.utc
+            ).isoformat(),
+        }
+
+    keys = [
+        item[
+            "recommendationKey"
+        ]
+        for item in prepared
+    ]
+
+    existing_by_key = {}
+
+    if keys:
+        existing_rows = db.execute(
+            select(
+                DiagnosticOperationalRecommendation
+            ).where(
+                DiagnosticOperationalRecommendation.recommendation_key.in_(
+                    keys
+                )
+            )
+        ).scalars().all()
+
+        existing_by_key = {
+            row.recommendation_key: row
+            for row in existing_rows
+        }
+
+    created = []
+
+    now = datetime.now(
+        timezone.utc
+    )
+
+    for item in prepared:
+        key = item[
+            "recommendationKey"
+        ]
+
+        if key in existing_by_key:
+            continue
+
+        record = item["record"]
+        candidate = item[
+            "candidate"
+        ]
+
+        row = (
+            DiagnosticOperationalRecommendation(
+                run_id=run.id,
+                experiment_id=(
+                    experiment_id
+                ),
+                vehicle_id=str(
+                    record[
+                        "vehicleId"
+                    ]
+                ),
+                case_id=(
+                    candidate.get(
+                        "caseId"
+                    )
+                ),
+                recommendation_key=key,
+                rules_version=(
+                    CLOSED_LOOP_RULES_VERSION
+                ),
+                recommendation_type=(
+                    candidate[
+                        "recommendationType"
+                    ]
+                ),
+                priority=(
+                    candidate[
+                        "priority"
+                    ]
+                ),
+                status=STATE_PROPOSED,
+                approval_required=True,
+                source_key=str(
+                    candidate[
+                        "sourceKey"
+                    ]
+                ),
+                reason=str(
+                    candidate[
+                        "reason"
+                    ]
+                ),
+                source_snapshot_json=(
+                    json.dumps(
+                        _closed_loop_source_snapshot(
+                            record,
+                            candidate,
+                        ),
+                        sort_keys=True,
+                    )
+                ),
+                created_at=now,
+                updated_at=now,
+                materialized_by=(
+                    request.actor
+                ),
+                last_actor=(
+                    request.actor
+                ),
+            )
+        )
+
+        # The recommendation key is database-unique. The initial bulk lookup
+        # handles ordinary repeat requests; this savepoint also handles the
+        # narrower race where another request inserts the same key after that
+        # lookup but before this request flushes its insert.
+        try:
+            with db.begin_nested():
+                db.add(row)
+                db.flush()
+
+                _closed_loop_add_activity(
+                    db,
+                    recommendation=row,
+                    activity_type="CREATED",
+                    actor=request.actor,
+                    from_state=None,
+                    to_state=STATE_PROPOSED,
+                    created_at=now,
+                    details={
+                        "materializedFromEvaluation": True,
+                        "automaticApproval": False,
+                        "automaticExecution": False,
+                        "physicalAction": False,
+                    },
+                )
+
+                # Keep recommendation + CREATED audit activity atomic inside
+                # the same savepoint.
+                db.flush()
+        except IntegrityError:
+            # A concurrent request may have won the unique-key race. Rollback
+            # is scoped to the savepoint, so recommendations created earlier
+            # in this request remain part of the outer transaction.
+            existing = db.execute(
+                select(
+                    DiagnosticOperationalRecommendation
+                ).where(
+                    DiagnosticOperationalRecommendation.recommendation_key
+                    == key
+                )
+            ).scalar_one_or_none()
+
+            if existing is None:
+                # The integrity failure was unrelated to recommendation-key
+                # idempotency; preserve the real database error.
+                raise
+
+            existing_by_key[key] = existing
+            continue
+
+        # Also protects against a duplicate key appearing twice in the same
+        # prepared candidate set before the final commit.
+        existing_by_key[key] = row
+        created.append(row)
+
+    db.commit()
+
+    for row in created:
+        db.refresh(row)
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            CLOSED_LOOP_RULES_VERSION
+        ),
+        **summary,
+        "materializeRequested": True,
+        "createdCount": len(
+            created
+        ),
+        "existingCount": (
+            len(prepared)
+            - len(created)
+        ),
+        "totalPersistedTargets": len(
+            prepared
+        ),
+        "scopePolicy": (
+            _closed_loop_scope_policy()
+        ),
+        "interpretationPolicy": (
+            "Materialization creates recommendation "
+            "workflow metadata only. No recommendation "
+            "is approved or executed automatically and "
+            "no diagnostic, maintenance, automation, "
+            "vehicle, or physical state is changed."
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get(
+    "/closed-loop/recommendations"
+)
+def closed_loop_recommendations(
+    status: str | None = Query(
+        default=None,
+    ),
+    recommendation_type: str | None = Query(
+        default=None,
+    ),
+    priority: str | None = Query(
+        default=None,
+    ),
+    vehicle_id: str | None = Query(
+        default=None,
+    ),
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=500,
+    ),
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    if (
+        status is not None
+        and status
+        not in CLOSED_LOOP_STATES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported recommendation status"
+                ),
+                "allowed": list(
+                    CLOSED_LOOP_STATES
+                ),
+            },
+        )
+
+    if (
+        recommendation_type is not None
+        and recommendation_type
+        not in CLOSED_LOOP_RECOMMENDATION_TYPES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported recommendation type"
+                ),
+                "allowed": list(
+                    CLOSED_LOOP_RECOMMENDATION_TYPES
+                ),
+            },
+        )
+
+    if (
+        priority is not None
+        and priority
+        not in CLOSED_LOOP_PRIORITIES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported recommendation priority"
+                ),
+                "allowed": list(
+                    CLOSED_LOOP_PRIORITIES
+                ),
+            },
+        )
+
+    experiment_id, run = (
+        _resolve_vehicle_twin_run(
+            db,
+            run_id,
+        )
+    )
+
+    statement = select(
+        DiagnosticOperationalRecommendation
+    ).where(
+        DiagnosticOperationalRecommendation.run_id
+        == run.id,
+        DiagnosticOperationalRecommendation.experiment_id
+        == experiment_id,
+    )
+
+    if status is not None:
+        statement = statement.where(
+            DiagnosticOperationalRecommendation.status
+            == status
+        )
+
+    if recommendation_type is not None:
+        statement = statement.where(
+            DiagnosticOperationalRecommendation.recommendation_type
+            == recommendation_type
+        )
+
+    if priority is not None:
+        statement = statement.where(
+            DiagnosticOperationalRecommendation.priority
+            == priority
+        )
+
+    if vehicle_id is not None:
+        statement = statement.where(
+            DiagnosticOperationalRecommendation.vehicle_id
+            == vehicle_id
+        )
+
+    rows = db.execute(
+        statement.order_by(
+            DiagnosticOperationalRecommendation.created_at,
+            DiagnosticOperationalRecommendation.id,
+        )
+    ).scalars().all()
+
+    selected = rows[:limit]
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            CLOSED_LOOP_RULES_VERSION
+        ),
+        "totalMatched": len(rows),
+        "returned": len(selected),
+        "recommendations": [
+            _closed_loop_recommendation_payload(
+                row
+            )
+            for row in selected
+        ],
+        "scopePolicy": (
+            _closed_loop_scope_policy()
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.get(
+    "/closed-loop/recommendations/{recommendation_id}"
+)
+def closed_loop_recommendation_detail(
+    recommendation_id: int,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, row = (
+        _closed_loop_selected_recommendation(
+            db,
+            recommendation_id=(
+                recommendation_id
+            ),
+            run_id=run_id,
+        )
+    )
+
+    activities = db.execute(
+        select(
+            DiagnosticOperationalRecommendationActivity
+        )
+        .where(
+            DiagnosticOperationalRecommendationActivity.recommendation_id
+            == row.id,
+            DiagnosticOperationalRecommendationActivity.run_id
+            == run.id,
+            DiagnosticOperationalRecommendationActivity.experiment_id
+            == experiment_id,
+        )
+        .order_by(
+            DiagnosticOperationalRecommendationActivity.created_at,
+            DiagnosticOperationalRecommendationActivity.id,
+        )
+    ).scalars().all()
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            CLOSED_LOOP_RULES_VERSION
+        ),
+        "recommendation": (
+            _closed_loop_recommendation_payload(
+                row
+            )
+        ),
+        "activities": [
+            _closed_loop_activity_payload(
+                activity
+            )
+            for activity in activities
+        ],
+        "scopePolicy": (
+            _closed_loop_scope_policy()
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+def _closed_loop_transition_response(
+    db: Session,
+    *,
+    recommendation_id: int,
+    run_id: int | None,
+    request: ClosedLoopTransitionRequest,
+    target_state: str,
+    activity_type: str,
+) -> dict:
+    experiment_id, run, row = (
+        _closed_loop_selected_recommendation(
+            db,
+            recommendation_id=(
+                recommendation_id
+            ),
+            run_id=run_id,
+        )
+    )
+
+    changed = _closed_loop_transition(
+        db,
+        recommendation=row,
+        target_state=target_state,
+        activity_type=activity_type,
+        actor=request.actor,
+        note=request.note,
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": (
+            CLOSED_LOOP_RULES_VERSION
+        ),
+        "changed": changed,
+        "recommendation": (
+            _closed_loop_recommendation_payload(
+                row
+            )
+        ),
+        "scopePolicy": (
+            _closed_loop_scope_policy()
+        ),
+        "interpretationPolicy": (
+            "This transition changes only the "
+            "FleetMind recommendation lifecycle. "
+            "It does not prove or perform physical "
+            "maintenance or vehicle actuation."
+        ),
+    }
+
+
+@router.post(
+    "/closed-loop/recommendations/{recommendation_id}/acknowledge"
+)
+def closed_loop_acknowledge(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _closed_loop_transition_response(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_ACKNOWLEDGED,
+        activity_type="ACKNOWLEDGED",
+    )
+
+
+@router.post(
+    "/closed-loop/recommendations/{recommendation_id}/request-approval"
+)
+def closed_loop_request_approval(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _closed_loop_transition_response(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=(
+            STATE_APPROVAL_REQUIRED
+        ),
+        activity_type=(
+            "APPROVAL_REQUESTED"
+        ),
+    )
+
+
+@router.post(
+    "/closed-loop/recommendations/{recommendation_id}/approve"
+)
+def closed_loop_approve(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _closed_loop_transition_response(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_APPROVED,
+        activity_type="APPROVED",
+    )
+
+
+@router.post(
+    "/closed-loop/recommendations/{recommendation_id}/mark-execution-ready"
+)
+def closed_loop_mark_execution_ready(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _closed_loop_transition_response(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=(
+            STATE_EXECUTION_READY
+        ),
+        activity_type="EXECUTION_READY",
+    )
+
+
+@router.post(
+    "/closed-loop/recommendations/{recommendation_id}/execute"
+)
+def closed_loop_execute(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _closed_loop_transition_response(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_EXECUTED,
+        activity_type="EXECUTED",
+    )
+
+
+@router.post(
+    "/closed-loop/recommendations/{recommendation_id}/reject"
+)
+def closed_loop_reject(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _closed_loop_transition_response(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_REJECTED,
+        activity_type="REJECTED",
+    )
+
+
+@router.post(
+    "/closed-loop/recommendations/{recommendation_id}/cancel"
+)
+def closed_loop_cancel(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _closed_loop_transition_response(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_CANCELLED,
+        activity_type="CANCELLED",
+    )
+
+
+@router.post(
+    "/closed-loop/recommendations/{recommendation_id}/supersede"
+)
+def closed_loop_supersede(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _closed_loop_transition_response(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_SUPERSEDED,
+        activity_type="SUPERSEDED",
+    )
+
+
+
+# Phase 8.1 — Decision Queue & Approval Orchestration
+#
+# Queue age, priority and review targets are internal workflow conventions.
+# They are not physical safety deadlines, physical-risk estimates,
+# technician-hour estimates, maintenance-duration promises, contractual
+# service-level agreements, or evidence of component condition.
+
+
+class DecisionQueueAssignmentRequest(BaseModel):
+    actor: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+    assignedTo: str | None = Field(
+        default=None,
+        max_length=64,
+    )
+    note: str | None = Field(
+        default=None,
+        max_length=2000,
+    )
+
+
+def _decision_queue_scope_policy() -> dict:
+    return {
+        "selectedRunOnly": True,
+        "activeTelemetryExperimentRequired": False,
+        "exactExperimentOnly": True,
+        "postRunTelemetryUsed": False,
+        "usesPrivateFailureTruth": False,
+        "failureMarkersExposed": False,
+        "workflowQueueOnly": True,
+        "assignmentMetadataOnly": True,
+        "automaticAssignment": False,
+        "automaticApproval": False,
+        "automaticExecution": False,
+        "reviewTargetIsSafetyDeadline": False,
+        "reviewTargetIsContractualSla": False,
+        "priorityIsPhysicalRisk": False,
+        "ageIsPhysicalCondition": False,
+        "technicianHours": False,
+        "physicalMaintenanceDuration": False,
+        "physicalAction": False,
+        "vehicleActuation": False,
+        "causalAttribution": False,
+        "modelRetrained": False,
+        "benchmarkModified": False,
+    }
+
+
+def _decision_queue_input(
+    row: DiagnosticOperationalRecommendation,
+) -> dict:
+    """Project persistence state into the pure Phase 8.1 queue rules."""
+
+    return {
+        "id": row.id,
+        "runId": row.run_id,
+        "experimentId": row.experiment_id,
+        "vehicleId": row.vehicle_id,
+        "caseId": row.case_id,
+        "recommendationType": (
+            row.recommendation_type
+        ),
+        "priority": row.priority,
+        "status": row.status,
+        "approvalRequired": (
+            bool(row.approval_required)
+        ),
+        "assignedTo": row.assigned_to,
+        "assignedAt": row.assigned_at,
+        "createdAt": row.created_at,
+        "updatedAt": row.updated_at,
+    }
+
+
+def _decision_queue_persisted_rows(
+    db: Session,
+    *,
+    run: DiagnosticModelRun,
+    experiment_id: str,
+) -> list[
+    DiagnosticOperationalRecommendation
+]:
+    return list(
+        db.execute(
+            select(
+                DiagnosticOperationalRecommendation
+            )
+            .where(
+                DiagnosticOperationalRecommendation.run_id
+                == run.id,
+                DiagnosticOperationalRecommendation.experiment_id
+                == experiment_id,
+            )
+            .order_by(
+                DiagnosticOperationalRecommendation.id
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _decision_queue_counts(
+    rows: list[
+        DiagnosticOperationalRecommendation
+    ],
+) -> dict:
+    return {
+        "total": len(rows),
+        "assigned": sum(
+            1
+            for row in rows
+            if row.assigned_to
+        ),
+        "unassigned": sum(
+            1
+            for row in rows
+            if not row.assigned_to
+        ),
+    }
+
+
+@router.get("/decision-queue/summary")
+def decision_queue_summary_api(
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run = (
+        _resolve_vehicle_twin_run(
+            db,
+            run_id,
+        )
+    )
+
+    persisted = (
+        _decision_queue_persisted_rows(
+            db,
+            run=run,
+            experiment_id=experiment_id,
+        )
+    )
+
+    now = datetime.now(
+        timezone.utc
+    )
+
+    summary = decision_queue_summary(
+        [
+            _decision_queue_input(row)
+            for row in persisted
+        ],
+        now=now,
+    )
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        **summary,
+        "assignment": (
+            _decision_queue_counts(
+                persisted
+            )
+        ),
+        "scopePolicy": (
+            _decision_queue_scope_policy()
+        ),
+        "generatedAt": (
+            now.isoformat()
+        ),
+    }
+
+
+@router.get("/decision-queue")
+def decision_queue_list(
+    status: str | None = Query(
+        default=None,
+    ),
+    priority: str | None = Query(
+        default=None,
+    ),
+    recommendation_type: str | None = Query(
+        default=None,
+    ),
+    assigned_to: str | None = Query(
+        default=None,
+    ),
+    unassigned: bool | None = Query(
+        default=None,
+    ),
+    include_terminal: bool = Query(
+        default=False,
+    ),
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=500,
+    ),
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    if (
+        status is not None
+        and status not in CLOSED_LOOP_STATES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported queue status"
+                ),
+                "allowed": list(
+                    CLOSED_LOOP_STATES
+                ),
+            },
+        )
+
+    if (
+        priority is not None
+        and priority
+        not in CLOSED_LOOP_PRIORITIES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported queue priority"
+                ),
+                "allowed": list(
+                    CLOSED_LOOP_PRIORITIES
+                ),
+            },
+        )
+
+    if (
+        recommendation_type is not None
+        and recommendation_type
+        not in CLOSED_LOOP_RECOMMENDATION_TYPES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Unsupported recommendation type"
+                ),
+                "allowed": list(
+                    CLOSED_LOOP_RECOMMENDATION_TYPES
+                ),
+            },
+        )
+
+    experiment_id, run = (
+        _resolve_vehicle_twin_run(
+            db,
+            run_id,
+        )
+    )
+
+    persisted = (
+        _decision_queue_persisted_rows(
+            db,
+            run=run,
+            experiment_id=experiment_id,
+        )
+    )
+
+    inputs = []
+
+    for row in persisted:
+        if (
+            status is not None
+            and row.status != status
+        ):
+            continue
+
+        if (
+            priority is not None
+            and row.priority != priority
+        ):
+            continue
+
+        if (
+            recommendation_type
+            is not None
+            and row.recommendation_type
+            != recommendation_type
+        ):
+            continue
+
+        if (
+            assigned_to is not None
+            and row.assigned_to
+            != assigned_to
+        ):
+            continue
+
+        if (
+            unassigned is True
+            and row.assigned_to
+        ):
+            continue
+
+        if (
+            unassigned is False
+            and not row.assigned_to
+        ):
+            continue
+
+        inputs.append(
+            _decision_queue_input(
+                row
+            )
+        )
+
+    now = datetime.now(
+        timezone.utc
+    )
+
+    rows = decision_queue_rows(
+        inputs,
+        now=now,
+        include_terminal=(
+            include_terminal
+        ),
+    )
+
+    selected = rows[:limit]
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            DECISION_QUEUE_RULES_VERSION
+        ),
+        "totalMatched": len(rows),
+        "returned": len(selected),
+        "queue": selected,
+        "scopePolicy": (
+            _decision_queue_scope_policy()
+        ),
+        "generatedAt": (
+            now.isoformat()
+        ),
+    }
+
+
+@router.get(
+    "/decision-queue/{recommendation_id}"
+)
+def decision_queue_detail(
+    recommendation_id: int,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, row = (
+        _closed_loop_selected_recommendation(
+            db,
+            recommendation_id=(
+                recommendation_id
+            ),
+            run_id=run_id,
+        )
+    )
+
+    activities = db.execute(
+        select(
+            DiagnosticOperationalRecommendationActivity
+        )
+        .where(
+            DiagnosticOperationalRecommendationActivity.recommendation_id
+            == row.id,
+            DiagnosticOperationalRecommendationActivity.run_id
+            == run.id,
+            DiagnosticOperationalRecommendationActivity.experiment_id
+            == experiment_id,
+        )
+        .order_by(
+            DiagnosticOperationalRecommendationActivity.created_at,
+            DiagnosticOperationalRecommendationActivity.id,
+        )
+    ).scalars().all()
+
+    queue_row = decision_queue_rows(
+        [
+            _decision_queue_input(
+                row
+            )
+        ],
+        now=datetime.now(
+            timezone.utc
+        ),
+        include_terminal=True,
+    )[0]
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "lineage": run.lineage,
+        "rulesVersion": (
+            DECISION_QUEUE_RULES_VERSION
+        ),
+        "queueRecord": queue_row,
+        "recommendation": (
+            _closed_loop_recommendation_payload(
+                row
+            )
+        ),
+        "allowedNextStates": list(
+            allowed_next_states(
+                row.status
+            )
+        ),
+        "assignmentAllowed": (
+            assignment_allowed(
+                row.status
+            )
+        ),
+        "activities": [
+            _closed_loop_activity_payload(
+                activity
+            )
+            for activity in activities
+        ],
+        "scopePolicy": (
+            _decision_queue_scope_policy()
+        ),
+        "generatedAt": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+
+@router.post(
+    "/decision-queue/{recommendation_id}/assign"
+)
+def decision_queue_assign(
+    recommendation_id: int,
+    request: DecisionQueueAssignmentRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    experiment_id, run, row = (
+        _closed_loop_selected_recommendation(
+            db,
+            recommendation_id=(
+                recommendation_id
+            ),
+            run_id=run_id,
+        )
+    )
+
+    if not assignment_allowed(
+        row.status
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Assignment cannot be changed "
+                "after the recommendation reaches "
+                "a terminal lifecycle state."
+            ),
+        )
+
+    target = (
+        request.assignedTo.strip()
+        if request.assignedTo
+        and request.assignedTo.strip()
+        else None
+    )
+
+    previous = row.assigned_to
+
+    if previous == target:
+        return {
+            "runId": run.id,
+            "experimentId": experiment_id,
+            "rulesVersion": (
+                DECISION_QUEUE_RULES_VERSION
+            ),
+            "changed": False,
+            "recommendation": (
+                _closed_loop_recommendation_payload(
+                    row
+                )
+            ),
+            "scopePolicy": (
+                _decision_queue_scope_policy()
+            ),
+        }
+
+    now = datetime.now(
+        timezone.utc
+    )
+
+    row.assigned_to = target
+    row.assigned_at = (
+        now
+        if target is not None
+        else None
+    )
+    row.updated_at = now
+    row.last_actor = request.actor
+
+    _closed_loop_add_activity(
+        db,
+        recommendation=row,
+        activity_type=(
+            "ASSIGNED"
+            if target is not None
+            else "UNASSIGNED"
+        ),
+        actor=request.actor,
+        from_state=row.status,
+        to_state=row.status,
+        note=request.note,
+        created_at=now,
+        details={
+            "previousAssignee": previous,
+            "assignedTo": target,
+            "workflowMetadataOnly": True,
+            "diagnosticEvidenceModified": False,
+            "physicalAction": False,
+        },
+    )
+
+    db.commit()
+    db.refresh(row)
+
+    return {
+        "runId": run.id,
+        "experimentId": experiment_id,
+        "rulesVersion": (
+            DECISION_QUEUE_RULES_VERSION
+        ),
+        "changed": True,
+        "recommendation": (
+            _closed_loop_recommendation_payload(
+                row
+            )
+        ),
+        "scopePolicy": (
+            _decision_queue_scope_policy()
+        ),
+        "interpretationPolicy": (
+            "Assignment changes recommendation "
+            "ownership metadata only. Diagnostic "
+            "evidence, model output and physical "
+            "vehicle state are unchanged."
+        ),
+    }
+
+
+def _decision_queue_transition(
+    db: Session,
+    *,
+    recommendation_id: int,
+    run_id: int | None,
+    request: ClosedLoopTransitionRequest,
+    target_state: str,
+    activity_type: str,
+) -> dict:
+    result = (
+        _closed_loop_transition_response(
+            db,
+            recommendation_id=(
+                recommendation_id
+            ),
+            run_id=run_id,
+            request=request,
+            target_state=target_state,
+            activity_type=activity_type,
+        )
+    )
+
+    result["decisionQueueRulesVersion"] = (
+        DECISION_QUEUE_RULES_VERSION
+    )
+
+    result["queueScopePolicy"] = (
+        _decision_queue_scope_policy()
+    )
+
+    return result
+
+
+@router.post(
+    "/decision-queue/{recommendation_id}/acknowledge"
+)
+def decision_queue_acknowledge(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _decision_queue_transition(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_ACKNOWLEDGED,
+        activity_type="ACKNOWLEDGED",
+    )
+
+
+@router.post(
+    "/decision-queue/{recommendation_id}/request-approval"
+)
+def decision_queue_request_approval(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _decision_queue_transition(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=(
+            STATE_APPROVAL_REQUIRED
+        ),
+        activity_type=(
+            "APPROVAL_REQUESTED"
+        ),
+    )
+
+
+@router.post(
+    "/decision-queue/{recommendation_id}/approve"
+)
+def decision_queue_approve(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _decision_queue_transition(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_APPROVED,
+        activity_type="APPROVED",
+    )
+
+
+@router.post(
+    "/decision-queue/{recommendation_id}/mark-execution-ready"
+)
+def decision_queue_mark_execution_ready(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _decision_queue_transition(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=(
+            STATE_EXECUTION_READY
+        ),
+        activity_type="EXECUTION_READY",
+    )
+
+
+@router.post(
+    "/decision-queue/{recommendation_id}/execute"
+)
+def decision_queue_execute(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _decision_queue_transition(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_EXECUTED,
+        activity_type="EXECUTED",
+    )
+
+
+@router.post(
+    "/decision-queue/{recommendation_id}/reject"
+)
+def decision_queue_reject(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _decision_queue_transition(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_REJECTED,
+        activity_type="REJECTED",
+    )
+
+
+@router.post(
+    "/decision-queue/{recommendation_id}/cancel"
+)
+def decision_queue_cancel(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _decision_queue_transition(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_CANCELLED,
+        activity_type="CANCELLED",
+    )
+
+
+@router.post(
+    "/decision-queue/{recommendation_id}/supersede"
+)
+def decision_queue_supersede(
+    recommendation_id: int,
+    request: ClosedLoopTransitionRequest,
+    run_id: int | None = Query(
+        default=None,
+        ge=1,
+    ),
+    db: Session = Depends(db_session),
+) -> dict:
+    return _decision_queue_transition(
+        db,
+        recommendation_id=(
+            recommendation_id
+        ),
+        run_id=run_id,
+        request=request,
+        target_state=STATE_SUPERSEDED,
+        activity_type="SUPERSEDED",
+    )
