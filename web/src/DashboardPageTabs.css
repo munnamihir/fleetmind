@@ -1,0 +1,406 @@
+/* =========================================================
+   FleetMind dashboard page-level nested tabs
+   Active-page UI: hidden heavy workspaces do not poll.
+   ========================================================= */
+
+.dashboardPageTabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, .10);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scroll-behavior: smooth;
+}
+
+.dashboardPageTab {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dashboardPageTab:hover {
+  color: inherit;
+  background: rgba(255, 255, 255, .035);
+}
+
+.dashboardPageTab.active {
+  color: inherit;
+  background: rgba(255, 255, 255, .075);
+  box-shadow: inset 0 -2px 0 rgba(255, 255, 255, .46);
+}
+
+.dashboardPageTab:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, .60);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------
+   Fleet Overview
+   --------------------------------------------------------- */
+
+main[data-dashboard-page='fleet']:not([data-dashboard-view='overview'])
+  > section.metrics {
+  display: none;
+}
+
+main[data-dashboard-page='fleet']
+  :is(section.grid:not(.lower), section.grid.lower) {
+  min-width: 0;
+}
+
+
+main[data-dashboard-page='fleet']:not([data-dashboard-view='fleet-health']):not([data-dashboard-view='emerging-signal'])
+  > section.grid:not(.lower) {
+  display: none;
+}
+
+main[data-dashboard-page='fleet'][data-dashboard-view='fleet-health']
+  > section.grid:not(.lower),
+main[data-dashboard-page='fleet'][data-dashboard-view='emerging-signal']
+  > section.grid:not(.lower) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='fleet']:not([data-dashboard-view='fleet-health'])
+  > section.grid:not(.lower) > .healthPanel,
+main[data-dashboard-page='fleet']:not([data-dashboard-view='emerging-signal'])
+  > section.grid:not(.lower) > .signalPanel {
+  display: none;
+}
+
+main[data-dashboard-page='fleet']:not([data-dashboard-view='incident-stream']):not([data-dashboard-view='cohort-analysis'])
+  > section.grid.lower {
+  display: none;
+}
+
+main[data-dashboard-page='fleet'][data-dashboard-view='incident-stream']
+  > section.grid.lower,
+main[data-dashboard-page='fleet'][data-dashboard-view='cohort-analysis']
+  > section.grid.lower {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='fleet']:not([data-dashboard-view='incident-stream'])
+  > section.grid.lower > .alertsPanel,
+main[data-dashboard-page='fleet']:not([data-dashboard-view='cohort-analysis'])
+  > section.grid.lower > .cohortPanel {
+  display: none;
+}
+
+/* ---------------------------------------------------------
+   Incidents
+   --------------------------------------------------------- */
+
+main[data-dashboard-page='incidents']:not([data-dashboard-view='overview'])
+  > section.metrics {
+  display: none;
+}
+
+main[data-dashboard-page='incidents']:not([data-dashboard-view='incident-stream']):not([data-dashboard-view='observed-failures'])
+  > section.grid.lower {
+  display: none;
+}
+
+main[data-dashboard-page='incidents'][data-dashboard-view='incident-stream']
+  > section.grid.lower,
+main[data-dashboard-page='incidents'][data-dashboard-view='observed-failures']
+  > section.grid.lower {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='incidents']:not([data-dashboard-view='incident-stream'])
+  > section.grid.lower > .alertsPanel:first-child,
+main[data-dashboard-page='incidents']:not([data-dashboard-view='observed-failures'])
+  > section.grid.lower > .alertsPanel:last-child {
+  display: none;
+}
+
+/* ---------------------------------------------------------
+   Reliability
+   --------------------------------------------------------- */
+
+main[data-dashboard-page='reliability']:not([data-dashboard-view='overview'])
+  > section.reliabilityMetrics {
+  display: none;
+}
+
+main[data-dashboard-page='reliability']:not([data-dashboard-view='survival-analysis']):not([data-dashboard-view='engineering'])
+  > section.reliabilityGrid {
+  display: none;
+}
+
+main[data-dashboard-page='reliability'][data-dashboard-view='survival-analysis']
+  > section.reliabilityGrid,
+main[data-dashboard-page='reliability'][data-dashboard-view='engineering']
+  > section.reliabilityGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='reliability']:not([data-dashboard-view='survival-analysis'])
+  > section.reliabilityGrid > .survivalPanel,
+main[data-dashboard-page='reliability']:not([data-dashboard-view='engineering'])
+  > section.reliabilityGrid > .engineeringPanel {
+  display: none;
+}
+
+main[data-dashboard-page='reliability']:not([data-dashboard-view='cohort-scorecard']):not([data-dashboard-view='early-warning'])
+  > section.reliabilityLower {
+  display: none;
+}
+
+main[data-dashboard-page='reliability'][data-dashboard-view='cohort-scorecard']
+  > section.reliabilityLower,
+main[data-dashboard-page='reliability'][data-dashboard-view='early-warning']
+  > section.reliabilityLower {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='reliability']:not([data-dashboard-view='cohort-scorecard'])
+  > section.reliabilityLower > .cohortReliabilityPanel,
+main[data-dashboard-page='reliability']:not([data-dashboard-view='early-warning'])
+  > section.reliabilityLower > .warningPanel {
+  display: none;
+}
+
+main[data-dashboard-page='reliability']:not([data-dashboard-view='failure-evaluation'])
+  > section.failurePanel {
+  display: none;
+}
+
+/* ---------------------------------------------------------
+   Cohorts / Components
+   --------------------------------------------------------- */
+
+main[data-dashboard-page='cohorts']:not([data-dashboard-view='overview'])
+  > section.metrics,
+main[data-dashboard-page='components']:not([data-dashboard-view='overview'])
+  > section.metrics {
+  display: none;
+}
+
+main[data-dashboard-page='cohorts']:not([data-dashboard-view='revision-evidence'])
+  > section.cohortPanel,
+main[data-dashboard-page='components']:not([data-dashboard-view='component-health'])
+  > section.cohortPanel {
+  display: none;
+}
+
+/* ---------------------------------------------------------
+   Firmware
+   --------------------------------------------------------- */
+
+main[data-dashboard-page='firmware']:not([data-dashboard-view='overview'])
+  > section.firmwareMetrics {
+  display: none;
+}
+
+main[data-dashboard-page='firmware']:not([data-dashboard-view='matched-cohort']):not([data-dashboard-view='hardware-software'])
+  > section.firmwareHeroGrid {
+  display: none;
+}
+
+main[data-dashboard-page='firmware'][data-dashboard-view='matched-cohort']
+  > section.firmwareHeroGrid,
+main[data-dashboard-page='firmware'][data-dashboard-view='hardware-software']
+  > section.firmwareHeroGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='firmware']:not([data-dashboard-view='matched-cohort'])
+  > section.firmwareHeroGrid > .regressionPanel,
+main[data-dashboard-page='firmware']:not([data-dashboard-view='hardware-software'])
+  > section.firmwareHeroGrid > .interactionPanel {
+  display: none;
+}
+
+main[data-dashboard-page='firmware']:not([data-dashboard-view='firmware-scorecard']):not([data-dashboard-view='method'])
+  > section.firmwareLower {
+  display: none;
+}
+
+main[data-dashboard-page='firmware'][data-dashboard-view='firmware-scorecard']
+  > section.firmwareLower,
+main[data-dashboard-page='firmware'][data-dashboard-view='method']
+  > section.firmwareLower {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='firmware']:not([data-dashboard-view='firmware-scorecard'])
+  > section.firmwareLower > .firmwareOverviewPanel,
+main[data-dashboard-page='firmware']:not([data-dashboard-view='method'])
+  > section.firmwareLower > .methodPanel {
+  display: none;
+}
+
+main[data-dashboard-page='firmware']:not([data-dashboard-view='interaction-matrix'])
+  > section.interactionTablePanel {
+  display: none;
+}
+
+/* ---------------------------------------------------------
+   Predictive ML
+   --------------------------------------------------------- */
+
+main[data-dashboard-page='ml']:not([data-dashboard-view='overview'])
+  > section.mlMetrics {
+  display: none;
+}
+
+/* While a model is not complete, keep the waiting/evidence-gate panel visible
+   so selecting a future detail tab never produces a blank screen. */
+main[data-dashboard-page='ml'] > section.mlWaitingPanel {
+  margin-top: 0;
+}
+
+main[data-dashboard-page='ml']:not([data-dashboard-view='benchmark']):not([data-dashboard-view='claim-policy'])
+  > section.mlHeroGrid {
+  display: none;
+}
+
+main[data-dashboard-page='ml'][data-dashboard-view='benchmark']
+  > section.mlHeroGrid,
+main[data-dashboard-page='ml'][data-dashboard-view='claim-policy']
+  > section.mlHeroGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='ml']:not([data-dashboard-view='benchmark'])
+  > section.mlHeroGrid > .mlEvaluationPanel,
+main[data-dashboard-page='ml']:not([data-dashboard-view='claim-policy'])
+  > section.mlHeroGrid > .qualificationPanel {
+  display: none;
+}
+
+main[data-dashboard-page='ml']:not([data-dashboard-view='model-selection']):not([data-dashboard-view='confusion-matrix'])
+  > section.benchmarkComparisonGrid {
+  display: none;
+}
+
+main[data-dashboard-page='ml'][data-dashboard-view='model-selection']
+  > section.benchmarkComparisonGrid,
+main[data-dashboard-page='ml'][data-dashboard-view='confusion-matrix']
+  > section.benchmarkComparisonGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='ml']:not([data-dashboard-view='model-selection'])
+  > section.benchmarkComparisonGrid > .baselinePanel,
+main[data-dashboard-page='ml']:not([data-dashboard-view='confusion-matrix'])
+  > section.benchmarkComparisonGrid > .confusionPanel {
+  display: none;
+}
+
+main[data-dashboard-page='ml']:not([data-dashboard-view='explainability']):not([data-dashboard-view='calibration'])
+  > section.mlLower:not(.benchmarkComparisonGrid) {
+  display: none;
+}
+
+main[data-dashboard-page='ml'][data-dashboard-view='explainability']
+  > section.mlLower:not(.benchmarkComparisonGrid),
+main[data-dashboard-page='ml'][data-dashboard-view='calibration']
+  > section.mlLower:not(.benchmarkComparisonGrid) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='ml']:not([data-dashboard-view='explainability'])
+  > section.mlLower:not(.benchmarkComparisonGrid) > .featurePanel,
+main[data-dashboard-page='ml']:not([data-dashboard-view='calibration'])
+  > section.mlLower:not(.benchmarkComparisonGrid) > .calibrationPanel {
+  display: none;
+}
+
+main[data-dashboard-page='ml']:not([data-dashboard-view='risk-history'])
+  > section.historyPanel,
+main[data-dashboard-page='ml']:not([data-dashboard-view='predictions'])
+  > section.predictionPanel {
+  display: none;
+}
+
+/* ---------------------------------------------------------
+   Root Cause
+
+   Lightweight overview panels remain mounted. Heavy intelligence modules
+   are mounted only while their tab is active, so hidden modules do not poll.
+   --------------------------------------------------------- */
+
+main[data-dashboard-page='diagnostics']:not([data-dashboard-view='overview'])
+  .rootCauseDashboard > .diagnosticMetrics {
+  display: none;
+}
+
+main[data-dashboard-page='diagnostics']:not([data-dashboard-view='hypotheses']):not([data-dashboard-view='benchmark'])
+  .rootCauseDashboard > .diagnosticTopGrid {
+  display: none;
+}
+
+main[data-dashboard-page='diagnostics'][data-dashboard-view='hypotheses']
+  .rootCauseDashboard > .diagnosticTopGrid,
+main[data-dashboard-page='diagnostics'][data-dashboard-view='benchmark']
+  .rootCauseDashboard > .diagnosticTopGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='diagnostics']:not([data-dashboard-view='hypotheses'])
+  .rootCauseDashboard > .diagnosticTopGrid > .diagnosticDistributionPanel,
+main[data-dashboard-page='diagnostics']:not([data-dashboard-view='benchmark'])
+  .rootCauseDashboard > .diagnosticTopGrid > .diagnosticBenchmarkPanel {
+  display: none;
+}
+
+main[data-dashboard-page='diagnostics']:not([data-dashboard-view='incident-queue']):not([data-dashboard-view='vehicle-investigation'])
+  .rootCauseDashboard > .diagnosticWorkGrid {
+  display: none;
+}
+
+main[data-dashboard-page='diagnostics'][data-dashboard-view='incident-queue']
+  .rootCauseDashboard > .diagnosticWorkGrid,
+main[data-dashboard-page='diagnostics'][data-dashboard-view='vehicle-investigation']
+  .rootCauseDashboard > .diagnosticWorkGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+main[data-dashboard-page='diagnostics']:not([data-dashboard-view='incident-queue'])
+  .rootCauseDashboard > .diagnosticWorkGrid > .diagnosticIncidentPanel,
+main[data-dashboard-page='diagnostics']:not([data-dashboard-view='vehicle-investigation'])
+  .rootCauseDashboard > .diagnosticWorkGrid > .vehicleInvestigationPanel {
+  display: none;
+}
+
+main[data-dashboard-page='diagnostics']:not([data-dashboard-view='model-comparison'])
+  .rootCauseDashboard > .diagnosticComparisonPanel {
+  display: none;
+}
+
+.dashboardPageTabs-diagnostics {
+  padding-bottom: 5px;
+}
+
+@media (max-width: 800px) {
+  .dashboardPageTabs {
+    margin-inline: -2px;
+  }
+
+  .dashboardPageTab {
+    min-height: 34px;
+    padding-inline: 11px;
+  }
+}

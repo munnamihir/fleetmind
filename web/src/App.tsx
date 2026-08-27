@@ -17,6 +17,10 @@ import {
   Zap,
 } from 'lucide-react';
 import { RootCauseDashboard } from './RootCauseDashboard';
+import {
+  DashboardPageTabs,
+  DEFAULT_DASHBOARD_VIEW,
+} from './DashboardPageTabs';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
@@ -346,6 +350,15 @@ export function App() {
   const [mlPredictions, setMlPredictions] = useState<MLPrediction[]>([]);
   const [connected, setConnected] = useState(false);
 
+  const [dashboardViewByPage, setDashboardViewByPage] =
+    useState<Record<Page, string>>({
+      ...DEFAULT_DASHBOARD_VIEW,
+    });
+
+  const activeDashboardView =
+    dashboardViewByPage[page] ?? DEFAULT_DASHBOARD_VIEW[page];
+
+
   useEffect(() => {
     let alive = true;
     let timerId: ReturnType<typeof setTimeout> | undefined;
@@ -353,11 +366,16 @@ export function App() {
 
     const pollDelayMs = 3000;
 
-    async function fetchJson<T>(url: string, signal: AbortSignal): Promise<T> {
+    async function fetchJson<T>(
+      url: string,
+      signal: AbortSignal,
+    ): Promise<T> {
       const response = await fetch(url, { signal });
 
       if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText}: ${url}`);
+        throw new Error(
+          `${response.status} ${response.statusText}: ${url}`,
+        );
       }
 
       return response.json() as Promise<T>;
@@ -369,49 +387,88 @@ export function App() {
       controller = new AbortController();
 
       try {
-        const [s, a, c, r, f, fo, fr, ms, mp] = await Promise.all([
-          fetchJson<Summary>(`${API}/api/v1/fleet/summary`, controller.signal),
-          fetchJson<Alert[]>(`${API}/api/v1/alerts?limit=10`, controller.signal),
-          fetchJson<Cohort[]>(`${API}/api/v1/cohorts/pump-revisions`, controller.signal),
-          fetchJson<ReliabilityCohort[]>(`${API}/api/v1/reliability/pump-revisions`, controller.signal),
-          fetchJson<FailureRow[]>(`${API}/api/v1/reliability/failures?limit=12`, controller.signal),
-          fetchJson<FirmwareOverviewRow[]>(`${API}/api/v1/firmware/overview`, controller.signal),
-          fetchJson<FirmwareRegression>(
-            `${API}/api/v1/firmware/regression?target=2026.32.4&control=2026.32.1`,
+        if (page === 'fleet') {
+          const [s, a, c] = await Promise.all([
+            fetchJson<Summary>(`${API}/api/v1/fleet/summary`, controller.signal),
+            fetchJson<Alert[]>(`${API}/api/v1/alerts?limit=10`, controller.signal),
+            fetchJson<Cohort[]>(`${API}/api/v1/cohorts/pump-revisions`, controller.signal),
+          ]);
+          if (alive) {
+            setSummary(s);
+            setAlerts(a);
+            setCohorts(c);
+          }
+        } else if (page === 'incidents') {
+          const [s, a, f] = await Promise.all([
+            fetchJson<Summary>(`${API}/api/v1/fleet/summary`, controller.signal),
+            fetchJson<Alert[]>(`${API}/api/v1/alerts?limit=10`, controller.signal),
+            fetchJson<FailureRow[]>(`${API}/api/v1/reliability/failures?limit=12`, controller.signal),
+          ]);
+          if (alive) {
+            setSummary(s);
+            setAlerts(a);
+            setFailures(f);
+          }
+        } else if (page === 'reliability') {
+          const [s, r, f] = await Promise.all([
+            fetchJson<Summary>(`${API}/api/v1/fleet/summary`, controller.signal),
+            fetchJson<ReliabilityCohort[]>(`${API}/api/v1/reliability/pump-revisions`, controller.signal),
+            fetchJson<FailureRow[]>(`${API}/api/v1/reliability/failures?limit=12`, controller.signal),
+          ]);
+          if (alive) {
+            setSummary(s);
+            setReliability(r);
+            setFailures(f);
+          }
+        } else if (page === 'cohorts' || page === 'components') {
+          const [c, r] = await Promise.all([
+            fetchJson<Cohort[]>(`${API}/api/v1/cohorts/pump-revisions`, controller.signal),
+            fetchJson<ReliabilityCohort[]>(`${API}/api/v1/reliability/pump-revisions`, controller.signal),
+          ]);
+          if (alive) {
+            setCohorts(c);
+            setReliability(r);
+          }
+        } else if (page === 'firmware') {
+          const [fo, fr] = await Promise.all([
+            fetchJson<FirmwareOverviewRow[]>(`${API}/api/v1/firmware/overview`, controller.signal),
+            fetchJson<FirmwareRegression>(
+              `${API}/api/v1/firmware/regression?target=2026.32.4&control=2026.32.1`,
+              controller.signal,
+            ),
+          ]);
+          if (alive) {
+            setFirmwareOverview(fo);
+            setFirmwareRegression(fr);
+          }
+        } else if (page === 'ml') {
+          const [ms, mp] = await Promise.all([
+            fetchJson<MLStatus>(`${API}/api/v1/ml/status`, controller.signal),
+            fetchJson<MLPrediction[]>(`${API}/api/v1/ml/predictions?limit=20`, controller.signal),
+          ]);
+          if (alive) {
+            setMlStatus(ms);
+            setMlPredictions(mp);
+          }
+        } else {
+          await fetchJson<{ status: string }>(
+            `${API}/health`,
             controller.signal,
-          ),
-          fetchJson<MLStatus>(`${API}/api/v1/ml/status`, controller.signal),
-          fetchJson<MLPrediction[]>(`${API}/api/v1/ml/predictions?limit=20`, controller.signal),
-        ]);
-
-        if (alive) {
-          setSummary(s);
-          setAlerts(a);
-          setCohorts(c);
-          setReliability(r);
-          setFailures(f);
-          setFirmwareOverview(fo);
-          setFirmwareRegression(fr);
-          setMlStatus(ms);
-          setMlPredictions(mp);
-          setConnected(true);
+          );
         }
+
+        if (alive) setConnected(true);
       } catch (error) {
         if (
           alive &&
           !(error instanceof DOMException && error.name === 'AbortError')
         ) {
-          console.error('FleetMind dashboard refresh failed:', error);
+          console.error('FleetMind active dashboard refresh failed:', error);
           setConnected(false);
         }
       } finally {
         controller = undefined;
-
-        // Never overlap polling cycles. The next cycle starts only after all
-        // requests from this cycle have settled.
-        if (alive) {
-          timerId = setTimeout(refresh, pollDelayMs);
-        }
+        if (alive) timerId = setTimeout(refresh, pollDelayMs);
       }
     }
 
@@ -419,14 +476,10 @@ export function App() {
 
     return () => {
       alive = false;
-
-      if (timerId !== undefined) {
-        clearTimeout(timerId);
-      }
-
+      if (timerId !== undefined) clearTimeout(timerId);
       controller?.abort();
     };
-  }, []);
+  }, [page]);
 
   const totalHealth = Math.max(
     1,
@@ -477,8 +530,21 @@ export function App() {
         </div>
       </aside>
 
-      <main>
+      <main
+        data-dashboard-page={page}
+        data-dashboard-view={activeDashboardView}
+      >
         <Header connected={connected} page={page} />
+        <DashboardPageTabs
+          page={page}
+          active={activeDashboardView}
+          onChange={view =>
+            setDashboardViewByPage(current => ({
+              ...current,
+              [page]: view,
+            }))
+          }
+        />
         {page === 'fleet' ? (
           <FleetOverview
             summary={summary}
@@ -516,7 +582,9 @@ export function App() {
         ) : page === 'ml' ? (
           <MLDashboard status={mlStatus} predictions={mlPredictions} />
         ) : (
-          <RootCauseDashboard />
+          <RootCauseDashboard
+            activeView={dashboardViewByPage.diagnostics}
+          />
         )}
       </main>
     </div>
