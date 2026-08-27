@@ -709,3 +709,274 @@ class DiagnosticVehicleTwinSnapshot(Base):
             "run_id", "vehicle_id", "created_at",
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 8.0 — Closed-Loop Operations Foundation
+# ---------------------------------------------------------------------------
+
+
+class DiagnosticOperationalRecommendation(Base):
+    __tablename__ = "diagnostic_operational_recommendations"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "diagnostic_model_runs.id",
+            ondelete="CASCADE",
+        ),
+        index=True,
+    )
+
+    experiment_id: Mapped[str] = mapped_column(
+        String(64),
+        index=True,
+    )
+
+    vehicle_id: Mapped[str] = mapped_column(
+        String(32),
+        index=True,
+    )
+
+    case_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "diagnostic_cases.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    recommendation_key: Mapped[str] = mapped_column(
+        String(64),
+        index=True,
+    )
+
+    rules_version: Mapped[str] = mapped_column(
+        String(64),
+        index=True,
+    )
+
+    recommendation_type: Mapped[str] = mapped_column(
+        String(64),
+        index=True,
+    )
+
+    priority: Mapped[str] = mapped_column(
+        String(8),
+        index=True,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(32),
+        index=True,
+    )
+
+    approval_required: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        index=True,
+    )
+
+    source_key: Mapped[str] = mapped_column(
+        String(256),
+        index=True,
+    )
+
+    reason: Mapped[str] = mapped_column(
+        Text,
+    )
+
+    source_snapshot_json: Mapped[str] = mapped_column(
+        Text,
+        default="{}",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+    )
+
+    materialized_by: Mapped[str] = mapped_column(
+        String(64),
+    )
+
+    last_actor: Mapped[str] = mapped_column(
+        String(64),
+    )
+
+    assigned_to: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+
+    assigned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+    acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    approval_required_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    execution_ready_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    executed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    rejected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    superseded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "recommendation_key",
+            name=(
+                "uq_diagnostic_operational_"
+                "recommendation_key"
+            ),
+        ),
+        Index(
+            "ix_diag_operational_rec_run_status_priority",
+            "run_id",
+            "status",
+            "priority",
+        ),
+        Index(
+            "ix_diag_operational_rec_run_vehicle_status",
+            "run_id",
+            "vehicle_id",
+            "status",
+        ),
+        Index(
+            "ix_diag_operational_rec_run_type_status",
+            "run_id",
+            "recommendation_type",
+            "status",
+        ),
+    )
+
+
+class DiagnosticOperationalRecommendationActivity(Base):
+    __tablename__ = (
+        "diagnostic_operational_recommendation_activities"
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    recommendation_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "diagnostic_operational_recommendations.id",
+            ondelete="CASCADE",
+        ),
+        index=True,
+    )
+
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "diagnostic_model_runs.id",
+            ondelete="CASCADE",
+        ),
+        index=True,
+    )
+
+    experiment_id: Mapped[str] = mapped_column(
+        String(64),
+        index=True,
+    )
+
+    vehicle_id: Mapped[str] = mapped_column(
+        String(32),
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+    )
+
+    activity_type: Mapped[str] = mapped_column(
+        String(48),
+        index=True,
+    )
+
+    actor: Mapped[str] = mapped_column(
+        String(64),
+        index=True,
+    )
+
+    from_state: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+
+    to_state: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+
+    note_text: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    details_json: Mapped[str] = mapped_column(
+        Text,
+        default="{}",
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_diag_operational_rec_activity_rec_created",
+            "recommendation_id",
+            "created_at",
+        ),
+        Index(
+            "ix_diag_operational_rec_activity_run_created",
+            "run_id",
+            "created_at",
+        ),
+    )

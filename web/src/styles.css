@@ -1996,3 +1996,1175 @@ header { display:flex; justify-content:space-between; gap:30px; align-items:flex
     min-width: 1050px;
   }
 }
+
+
+/* =========================================================
+   Phases 7.6–8.1 — Fleet Command & Operations
+   ========================================================= */
+
+.fleetCommandOperations {
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(
+      155deg,
+      rgba(255,255,255,.018),
+      rgba(0,0,0,.12)
+    );
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.fleetCommandHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.fleetCommandHeader h2 {
+  margin: 4px 0 7px;
+  font-size: 19px;
+  font-weight: 560;
+  letter-spacing: -.02em;
+}
+
+.fleetCommandHeader .muted {
+  max-width: 1000px;
+  margin: 0;
+}
+
+.fleetOpsRefresh {
+  min-height: 36px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,.045);
+  color: inherit;
+  cursor: pointer;
+}
+
+.fleetOpsRefresh:hover {
+  background: rgba(255,255,255,.08);
+}
+
+.fleetOpsRefresh:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.fleetOpsRefresh .spinning {
+  animation: fleetOpsSpin 1s linear infinite;
+}
+
+@keyframes fleetOpsSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+/* Truth boundary */
+
+.fleetOpsTruthBoundary {
+  margin: 16px 0;
+  padding: 11px 13px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(255,255,255,.022);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.fleetOpsTruthBoundary svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: #91a29a;
+}
+
+
+/* Workspace tabs */
+
+.fleetOpsTabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 15px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.fleetOpsTab {
+  min-height: 47px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.fleetOpsTab:last-child {
+  border-right: 0;
+}
+
+.fleetOpsTab:hover {
+  color: inherit;
+  background: rgba(255,255,255,.035);
+}
+
+.fleetOpsTab.active {
+  color: inherit;
+  background: rgba(255,255,255,.075);
+  box-shadow:
+    inset 0 -2px 0 rgba(255,255,255,.48);
+}
+
+
+/* Workspace shell */
+
+.fleetOpsWorkspace {
+  display: grid;
+  gap: 10px;
+}
+
+.fleetOpsPanel {
+  min-height: auto;
+}
+
+.fleetOpsPanel .panelTitle h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -.012em;
+}
+
+
+/* Metrics */
+
+.fleetOpsMetricGrid {
+  display: grid;
+  grid-template-columns:
+    repeat(5, minmax(130px, 1fr));
+  gap: 9px;
+}
+
+.fleetOpsMetricGrid.compact {
+  grid-template-columns:
+    repeat(4, minmax(130px, 1fr));
+  margin-top: 12px;
+}
+
+.fleetOpsMetric {
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(255,255,255,.025);
+}
+
+.fleetOpsMetric span,
+.fleetOpsMetric small {
+  display: block;
+}
+
+.fleetOpsMetric span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.fleetOpsMetric strong {
+  display: block;
+  margin: 5px 0 3px;
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 550;
+  letter-spacing: -.03em;
+}
+
+.fleetOpsMetric small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+}
+
+
+/* Two-column content */
+
+.fleetOpsTwoColumn {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, 1fr);
+  gap: 10px;
+}
+
+
+/* Command queues */
+
+.fleetOpsQueueGroups {
+  display: grid;
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.fleetOpsQueueGroup {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0,0,0,.08);
+}
+
+.fleetOpsQueueGroupHead {
+  min-height: 50px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fleetOpsQueueGroupHead > div {
+  min-width: 0;
+}
+
+.fleetOpsQueueGroupHead b,
+.fleetOpsQueueGroupHead span {
+  display: block;
+}
+
+.fleetOpsQueueGroupHead b {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.fleetOpsQueueGroupHead span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.fleetOpsQueueGroupHead svg {
+  color: var(--muted);
+}
+
+.fleetOpsVehicleMini {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  display: grid;
+  grid-template-columns:
+    minmax(95px, .75fr)
+    minmax(120px, 1fr)
+    54px;
+  gap: 10px;
+  align-items: center;
+  border: 0;
+  border-top: 1px solid rgba(255,255,255,.035);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fleetOpsVehicleMini:first-of-type {
+  border-top: 0;
+}
+
+.fleetOpsVehicleMini:hover {
+  background: rgba(255,255,255,.035);
+}
+
+.fleetOpsVehicleMini b {
+  font-size: 10px;
+}
+
+.fleetOpsVehicleMini span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fleetOpsVehicleMini strong {
+  text-align: right;
+  font-size: 13px;
+  font-weight: 560;
+}
+
+
+/* Cohort watch */
+
+.fleetOpsSelect {
+  max-width: 175px;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: inherit;
+}
+
+.fleetOpsCohortList {
+  display: grid;
+  margin-top: 13px;
+}
+
+.fleetOpsCohortRow {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.3fr)
+    minmax(90px, .7fr)
+    minmax(90px, .7fr);
+  gap: 12px;
+  align-items: center;
+  padding: 11px 2px;
+  border-top: 1px solid var(--border);
+}
+
+.fleetOpsCohortRow:first-child {
+  border-top: 0;
+}
+
+.fleetOpsCohortRow > div:first-child {
+  min-width: 0;
+}
+
+.fleetOpsCohortRow b,
+.fleetOpsCohortRow span,
+.fleetOpsCohortRow strong {
+  display: block;
+}
+
+.fleetOpsCohortRow b {
+  overflow: hidden;
+  font-size: 10px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fleetOpsCohortRow span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.fleetOpsCohortRow strong {
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 560;
+}
+
+
+/* Attention factors */
+
+.fleetOpsFactorGrid {
+  display: grid;
+  grid-template-columns:
+    repeat(4, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.fleetOpsFactorGrid > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,.018);
+}
+
+.fleetOpsFactorGrid span,
+.fleetOpsFactorGrid small {
+  display: block;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.fleetOpsFactorGrid span {
+  min-height: 24px;
+  overflow: hidden;
+  letter-spacing: .04em;
+  text-overflow: ellipsis;
+}
+
+.fleetOpsFactorGrid strong {
+  display: block;
+  margin: 5px 0 3px;
+  font-size: 17px;
+  font-weight: 550;
+}
+
+
+/* Explainability */
+
+.fleetOpsExplainGrid {
+  display: grid;
+  grid-template-columns:
+    minmax(270px, .75fr)
+    minmax(0, 1.25fr);
+  gap: 10px;
+}
+
+.fleetOpsExplainVehicleList {
+  max-height: 570px;
+  overflow-y: auto;
+  margin-top: 13px;
+  padding-right: 3px;
+}
+
+.fleetOpsExplainVehicle {
+  width: 100%;
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    76px
+    18px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fleetOpsExplainVehicle:first-child {
+  border-top: 0;
+}
+
+.fleetOpsExplainVehicle:hover {
+  background: rgba(255,255,255,.025);
+}
+
+.fleetOpsExplainVehicle.selected {
+  background: rgba(255,255,255,.055);
+}
+
+.fleetOpsExplainVehicle b,
+.fleetOpsExplainVehicle span,
+.fleetOpsExplainVehicle strong {
+  display: block;
+}
+
+.fleetOpsExplainVehicle b {
+  font-size: 10px;
+}
+
+.fleetOpsExplainVehicle span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.fleetOpsExplainVehicle strong {
+  text-align: right;
+  font-size: 15px;
+  font-weight: 560;
+}
+
+.fleetOpsExplainVehicle svg {
+  color: #8aae97;
+}
+
+.fleetOpsAttentionHero {
+  display: grid;
+  grid-template-columns:
+    1fr
+    20px
+    1fr
+    1fr;
+  gap: 10px;
+  align-items: center;
+  margin: 16px 0;
+}
+
+.fleetOpsAttentionHero > div {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,.02);
+}
+
+.fleetOpsAttentionHero > svg {
+  justify-self: center;
+  color: var(--muted);
+}
+
+.fleetOpsAttentionHero span,
+.fleetOpsAttentionHero strong {
+  display: block;
+}
+
+.fleetOpsAttentionHero span {
+  color: var(--muted);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+
+.fleetOpsAttentionHero strong {
+  margin-top: 5px;
+  font-size: 22px;
+  font-weight: 550;
+}
+
+.fleetOpsComponentList {
+  display: grid;
+}
+
+.fleetOpsComponentRow {
+  min-height: 46px;
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    75px;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 2px;
+  border-top: 1px solid var(--border);
+}
+
+.fleetOpsComponentRow b,
+.fleetOpsComponentRow span {
+  display: block;
+}
+
+.fleetOpsComponentRow b {
+  font-size: 10px;
+}
+
+.fleetOpsComponentRow span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.fleetOpsComponentRow strong {
+  text-align: right;
+  font-size: 13px;
+  font-weight: 560;
+}
+
+
+/* Evidence inventory */
+
+.fleetOpsEvidenceLayers {
+  display: grid;
+  grid-template-columns:
+    repeat(2, minmax(130px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.fleetOpsEvidenceLayer {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0,0,0,.07);
+  opacity: .55;
+}
+
+.fleetOpsEvidenceLayer.present {
+  opacity: 1;
+  background: rgba(255,255,255,.022);
+}
+
+.fleetOpsEvidenceLayer svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.fleetOpsEvidenceLayer.present svg {
+  color: #8fa497;
+}
+
+.fleetOpsEvidenceLayer b,
+.fleetOpsEvidenceLayer span {
+  display: block;
+}
+
+.fleetOpsEvidenceLayer b {
+  font-size: 9px;
+}
+
+.fleetOpsEvidenceLayer span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+
+/* Evidence lineage */
+
+.fleetOpsLineagePath {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 18px;
+}
+
+.fleetOpsLineageNode {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.fleetOpsLineageNode span {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+  font-size: 9px;
+}
+
+.fleetOpsLineageNode svg {
+  color: var(--muted);
+}
+
+
+/* Operator controls */
+
+.fleetOpsOperatorBar {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(255,255,255,.02);
+}
+
+.fleetOpsOperatorBar > span {
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.fleetOpsOperatorBar > svg {
+  color: #94a79b;
+}
+
+.fleetOpsOperatorBar input {
+  width: 180px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  color: inherit;
+  outline: none;
+}
+
+.fleetOpsOperatorBar input:focus {
+  border-color: #555f6b;
+}
+
+.fleetOpsOperatorBar small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+
+/* Decision queue */
+
+.fleetOpsDecisionTable {
+  width: 100%;
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.fleetOpsDecisionHead,
+.fleetOpsDecisionRow {
+  min-width: 1090px;
+  display: grid;
+  grid-template-columns:
+    34px
+    110px
+    minmax(145px, 1fr)
+    65px
+    105px
+    110px
+    125px
+    minmax(190px, auto);
+  gap: 9px;
+  align-items: center;
+}
+
+.fleetOpsDecisionHead {
+  padding: 0 9px 9px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.fleetOpsDecisionRow {
+  min-height: 58px;
+  padding: 9px;
+  border-top: 1px solid var(--border);
+  font-size: 9px;
+}
+
+.fleetOpsDecisionRow > span {
+  min-width: 0;
+}
+
+.fleetOpsDecisionRow > span:nth-child(5) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.fleetOpsDecisionRow > span:nth-child(5) b {
+  color: #c5a96c;
+  font-weight: 550;
+}
+
+.fleetOpsVehicleLink {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fleetOpsVehicleLink:hover {
+  text-decoration: underline;
+}
+
+.fleetOpsPriority {
+  width: fit-content;
+  min-width: 35px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  text-align: center;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.fleetOpsPriority.priority-p0 {
+  border-color: #684244;
+  background: rgba(132,67,70,.13);
+  color: #d69a9b;
+}
+
+.fleetOpsPriority.priority-p1 {
+  border-color: #65553a;
+  background: rgba(136,108,54,.12);
+  color: #d2b477;
+}
+
+.fleetOpsPriority.priority-p2 {
+  border-color: #445161;
+  background: rgba(77,96,119,.12);
+  color: #a8b9cb;
+}
+
+.fleetOpsPriority.priority-p3 {
+  color: var(--muted);
+}
+
+.fleetOpsRowActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fleetOpsRowActions button,
+.fleetOpsClosedLoopActions button {
+  min-height: 31px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(255,255,255,.035);
+  color: inherit;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.fleetOpsRowActions button:hover,
+.fleetOpsClosedLoopActions button:hover {
+  background: rgba(255,255,255,.075);
+}
+
+.fleetOpsRowActions button.primary,
+.fleetOpsClosedLoopActions button.primary {
+  border-color: #49534e;
+  background: rgba(103,124,112,.13);
+  color: #c7d6cd;
+}
+
+.fleetOpsRowActions button:disabled,
+.fleetOpsClosedLoopActions button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+
+/* Closed-loop evaluation */
+
+.fleetOpsClosedLoopHero {
+  min-height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 17px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255,255,255,.035),
+      rgba(255,255,255,.012)
+    );
+}
+
+.fleetOpsClosedLoopHero > div:first-child {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+
+.fleetOpsClosedLoopHero > div:first-child > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #9aab9f;
+}
+
+.fleetOpsClosedLoopHero span {
+  display: block;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .09em;
+}
+
+.fleetOpsClosedLoopHero h3 {
+  margin: 4px 0 5px;
+  font-size: 15px;
+  font-weight: 550;
+}
+
+.fleetOpsClosedLoopHero p {
+  max-width: 650px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.fleetOpsClosedLoopActions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 7px;
+}
+
+
+/* Persisted recommendations */
+
+.fleetOpsRecommendationList {
+  display: grid;
+  margin-top: 14px;
+}
+
+.fleetOpsRecommendation {
+  display: grid;
+  grid-template-columns:
+    34px
+    minmax(125px, .8fr)
+    70px
+    120px
+    110px
+    minmax(220px, 1.6fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 64px;
+  padding: 10px 3px;
+  border-top: 1px solid var(--border);
+}
+
+.fleetOpsRecommendation:first-child {
+  border-top: 0;
+}
+
+.fleetOpsRecommendationIcon {
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+}
+
+.fleetOpsRecommendation span,
+.fleetOpsRecommendation b {
+  display: block;
+}
+
+.fleetOpsRecommendation span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.fleetOpsRecommendation b {
+  margin-top: 3px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.fleetOpsRecommendationIdentity b {
+  margin-top: 0;
+  font-size: 10px;
+}
+
+.fleetOpsRecommendationIdentity span {
+  margin-top: 3px;
+}
+
+.fleetOpsRecommendationReason {
+  min-width: 0;
+}
+
+.fleetOpsRecommendationReason p {
+  margin: 3px 0 0;
+  color: #929aa4;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+
+/* Closed-loop guardrail */
+
+.fleetOpsGuardrail {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid #38433d;
+  border-radius: 9px;
+  background: rgba(85,108,94,.07);
+}
+
+.fleetOpsGuardrail svg {
+  flex: 0 0 auto;
+  color: #9db0a3;
+}
+
+.fleetOpsGuardrail b,
+.fleetOpsGuardrail span {
+  display: block;
+}
+
+.fleetOpsGuardrail b {
+  font-size: 10px;
+}
+
+.fleetOpsGuardrail span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+
+/* Responsive Fleet Command */
+
+@media (max-width: 1250px) {
+  .fleetOpsMetricGrid {
+    grid-template-columns:
+      repeat(3, minmax(130px, 1fr));
+  }
+
+  .fleetOpsMetricGrid.compact {
+    grid-template-columns:
+      repeat(2, minmax(130px, 1fr));
+  }
+
+  .fleetOpsFactorGrid {
+    grid-template-columns:
+      repeat(2, minmax(120px, 1fr));
+  }
+
+  .fleetOpsRecommendation {
+    grid-template-columns:
+      30px
+      minmax(120px, .8fr)
+      60px
+      110px
+      100px
+      minmax(180px, 1.5fr);
+  }
+}
+
+@media (max-width: 1050px) {
+  .fleetOpsTwoColumn,
+  .fleetOpsExplainGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetOpsExplainVehicleList {
+    max-height: 330px;
+  }
+
+  .fleetOpsRecommendationList {
+    overflow-x: auto;
+  }
+
+  .fleetOpsRecommendation {
+    min-width: 900px;
+  }
+}
+
+@media (max-width: 800px) {
+  .fleetCommandHeader {
+    flex-direction: column;
+  }
+
+  .fleetOpsTabs {
+    grid-template-columns:
+      repeat(2, 1fr);
+  }
+
+  .fleetOpsTab:nth-child(2) {
+    border-right: 0;
+  }
+
+  .fleetOpsTab:nth-child(-n+2) {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .fleetOpsMetricGrid,
+  .fleetOpsMetricGrid.compact {
+    grid-template-columns:
+      repeat(2, minmax(120px, 1fr));
+  }
+
+  .fleetOpsCohortRow {
+    grid-template-columns:
+      minmax(130px, 1.2fr)
+      .7fr
+      .7fr;
+  }
+
+  .fleetOpsAttentionHero {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  .fleetOpsAttentionHero > svg {
+    display: none;
+  }
+
+  .fleetOpsOperatorBar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .fleetOpsOperatorBar small {
+    width: 100%;
+    margin-left: 25px;
+  }
+
+  .fleetOpsClosedLoopHero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .fleetOpsClosedLoopActions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 570px) {
+  .fleetCommandOperations {
+    padding: 12px;
+  }
+
+  .fleetOpsMetricGrid,
+  .fleetOpsMetricGrid.compact,
+  .fleetOpsFactorGrid,
+  .fleetOpsEvidenceLayers {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetOpsTabs {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetOpsTab {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .fleetOpsTab:last-child {
+    border-bottom: 0;
+  }
+
+  .fleetOpsCohortRow {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .fleetOpsCohortRow > div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .fleetOpsAttentionHero {
+    grid-template-columns: 1fr;
+  }
+
+  .fleetOpsOperatorBar input {
+    width: 100%;
+  }
+
+  .fleetOpsOperatorBar small {
+    margin-left: 0;
+  }
+
+  .fleetOpsClosedLoopActions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
