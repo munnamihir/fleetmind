@@ -1,0 +1,181 @@
+services:
+  - type: web
+    runtime: static
+    name: fleetmind-munnamihir
+    buildCommand: cd web && npm install && VITE_API_URL= npm run build
+    staticPublishPath: web/dist
+    autoDeployTrigger: commit
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://fleetmind-api-munnamihir.onrender.com/api/*
+      - type: rewrite
+        source: /health
+        destination: https://fleetmind-api-munnamihir.onrender.com/health
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+
+  - type: web
+    runtime: python
+    name: fleetmind-api-munnamihir
+    region: virginia
+    plan: 0.5c-512mb
+    buildCommand: pip install -r services/api/requirements.txt
+    startCommand: PYTHONPATH=services/common:services/api uvicorn app.main:app --app-dir services/api --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fleetmind-postgres-munnamihir
+          property: connectionString
+      - key: FLEETMIND_AUTO_MIGRATE
+        value: "true"
+      - key: ML_MODEL_LINEAGE
+        value: fm-ml-6.1-exp-v1
+
+  - type: worker
+    runtime: python
+    name: fleetmind-worker-munnamihir
+    region: virginia
+    plan: 0.5c-512mb
+    buildCommand: pip install -r services/worker/requirements.txt
+    startCommand: PYTHONPATH=services/common:services/worker python -m app.cloud
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fleetmind-postgres-munnamihir
+          property: connectionString
+      - key: KAFKA_BOOTSTRAP_SERVERS
+        sync: false
+      - key: KAFKA_SECURITY_PROTOCOL
+        value: SASL_SSL
+      - key: KAFKA_SASL_MECHANISM
+        value: SCRAM-SHA-256
+      - key: KAFKA_SASL_USERNAME
+        sync: false
+      - key: KAFKA_SASL_PASSWORD
+        sync: false
+      - key: KAFKA_AUTO_CREATE_TOPICS
+        value: "true"
+      - key: KAFKA_TOPIC_PARTITIONS
+        value: "3"
+      - key: KAFKA_TOPIC_REPLICATION_FACTOR
+        value: "3"
+      - key: TELEMETRY_TOPIC
+        value: vehicle.telemetry.v1
+      - key: FAILURE_TOPIC
+        value: vehicle.failure-events.v1
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  - type: worker
+    runtime: python
+    name: fleetmind-simulator-munnamihir
+    region: virginia
+    plan: 0.5c-512mb
+    buildCommand: pip install -r services/simulator/requirements.txt
+    startCommand: PYTHONPATH=services/common:services/simulator python -m app.cloud
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: KAFKA_BOOTSTRAP_SERVERS
+        sync: false
+      - key: KAFKA_SECURITY_PROTOCOL
+        value: SASL_SSL
+      - key: KAFKA_SASL_MECHANISM
+        value: SCRAM-SHA-256
+      - key: KAFKA_SASL_USERNAME
+        sync: false
+      - key: KAFKA_SASL_PASSWORD
+        sync: false
+      - key: KAFKA_AUTO_CREATE_TOPICS
+        value: "true"
+      - key: KAFKA_TOPIC_PARTITIONS
+        value: "3"
+      - key: KAFKA_TOPIC_REPLICATION_FACTOR
+        value: "3"
+      - key: TELEMETRY_TOPIC
+        value: vehicle.telemetry.v1
+      - key: FAILURE_TOPIC
+        value: vehicle.failure-events.v1
+      - key: SIMULATED_VEHICLES
+        value: "500"
+      - key: SIM_EVENTS_PER_SECOND
+        value: "120"
+      - key: SIM_TIME_ACCELERATION
+        value: "600"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  - type: worker
+    runtime: python
+    name: fleetmind-ml-munnamihir
+    region: virginia
+    plan: 1c-2g
+    buildCommand: pip install -r services/ml/requirements.txt
+    startCommand: PYTHONPATH=services/common:services/ml python -m app.main
+    autoDeployTrigger: commit
+    disk:
+      name: fleetmind-ml-artifacts
+      mountPath: /var/data/fleetmind-artifacts
+      sizeGB: 5
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fleetmind-postgres-munnamihir
+          property: connectionString
+      - key: ML_MODEL_LINEAGE
+        value: fm-ml-6.1-exp-v1
+      - key: ML_FAILURE_HORIZON_MILES
+        value: "2500"
+      - key: ML_WINDOW_SIZE
+        value: "12"
+      - key: ML_WINDOW_STRIDE
+        value: "4"
+      - key: ML_MAX_EXAMPLES_PER_VEHICLE
+        value: "32"
+      - key: ML_MAX_TELEMETRY_ROWS
+        value: "250000"
+      - key: ML_MIN_TRAIN_EXAMPLES
+        value: "500"
+      - key: ML_MIN_TRAIN_POSITIVES
+        value: "5"
+      - key: ML_MIN_TEST_EXAMPLES
+        value: "80"
+      - key: ML_STARTUP_DELAY_SECONDS
+        value: "20"
+      - key: ML_TRAIN_INTERVAL_SECONDS
+        value: "90"
+      - key: ML_ARTIFACT_DIR
+        value: /var/data/fleetmind-artifacts
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+databases:
+  - name: fleetmind-postgres-munnamihir
+    region: virginia
+    plan: 0.5c-1g
+    postgresMajorVersion: "16"
+    databaseName: fleetmind
+    user: fleetmind
+    ipAllowList: []
