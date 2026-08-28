@@ -143,7 +143,7 @@ export function DashboardPageTabs({
 
     const buttons = event.currentTarget
       .parentElement
-      ?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+      ?.querySelectorAll<HTMLButtonElement>('[role="tab"]:not([hidden])');
 
     buttons?.[target]?.focus();
   }
@@ -176,6 +176,20 @@ export function DashboardPageTabs({
             {tab.label}
           </button>
         ))}
+
+        {page === 'diagnostics' && (
+          <button
+            type="button"
+            role="tab"
+            className="dashboardPageTab"
+            tabIndex={-1}
+            aria-hidden="true"
+            hidden
+            onClick={() => onChange('fleet-command')}
+          >
+            Fleet Command
+          </button>
+        )}
       </div>
 
       {advancedTabs.length > 0 && (
