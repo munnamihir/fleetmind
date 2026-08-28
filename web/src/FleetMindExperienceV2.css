@@ -1,0 +1,879 @@
+:root {
+  --fm-bg-0: #06080b;
+  --fm-bg-1: #0a0d12;
+  --fm-bg-2: #0e1218;
+  --fm-bg-3: #121821;
+  --fm-surface: rgba(14, 18, 24, 0.86);
+  --fm-surface-strong: rgba(17, 22, 29, 0.96);
+  --fm-surface-soft: rgba(255, 255, 255, 0.025);
+  --fm-border: rgba(160, 178, 200, 0.14);
+  --fm-border-strong: rgba(176, 195, 219, 0.23);
+  --fm-text: #f5f8fb;
+  --fm-text-2: #bac5d1;
+  --fm-text-3: #7f8b98;
+  --fm-text-4: #53606e;
+  --fm-accent: #79b7ff;
+  --fm-accent-2: #87e1cf;
+  --fm-positive: #7fd6a0;
+  --fm-warning: #e4b86f;
+  --fm-critical: #ef8585;
+  --fm-radius-sm: 8px;
+  --fm-radius: 13px;
+  --fm-radius-lg: 18px;
+  --fm-shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.18);
+  --fm-shadow: 0 20px 60px rgba(0, 0, 0, 0.34);
+  --fm-shadow-strong: 0 32px 90px rgba(0, 0, 0, 0.48);
+}
+
+html {
+  color-scheme: dark;
+  background: var(--fm-bg-0);
+}
+
+body {
+  color: var(--fm-text);
+  background:
+    radial-gradient(circle at 72% -8%, rgba(72, 125, 191, 0.13), transparent 34%),
+    radial-gradient(circle at 18% 15%, rgba(78, 165, 147, 0.055), transparent 29%),
+    linear-gradient(180deg, #07090d 0%, #05070a 100%);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  z-index: -2;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.22;
+  background-image:
+    linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.014) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(to bottom, rgba(0,0,0,.45), transparent 78%);
+}
+
+::selection {
+  color: #071018;
+  background: #9bc9ff;
+}
+
+* {
+  scrollbar-color: #2a3541 transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #2b3541;
+  background-clip: padding-box;
+}
+
+.fmV2Ambient {
+  position: fixed;
+  z-index: 0;
+  top: -180px;
+  left: 34%;
+  width: 880px;
+  height: 440px;
+  pointer-events: none;
+  opacity: .42;
+  filter: blur(80px);
+  background: radial-gradient(circle, rgba(81, 139, 214, .16), transparent 64%);
+}
+
+/* Replace the Phase 10 quick strip with one unified command surface. The
+   underlying buttons stay mounted so search/help logic remains untouched. */
+.fmExperienceBar {
+  display: none !important;
+}
+
+.fmWorkInboxLauncher {
+  position: fixed !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.fmV2CommandBar {
+  position: fixed;
+  z-index: 90;
+  top: 13px;
+  left: 252px;
+  right: 18px;
+  min-height: 56px;
+  padding: 7px;
+  display: grid;
+  grid-template-columns: minmax(190px, 280px) minmax(250px, 560px) minmax(330px, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--fm-border-strong);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(18, 23, 31, .92), rgba(10, 14, 19, .94));
+  backdrop-filter: blur(24px) saturate(135%);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, .38), inset 0 1px rgba(255,255,255,.035);
+}
+
+.fmV2Location {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+}
+
+.fmV2LocationMark {
+  width: 31px;
+  height: 31px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(121,183,255,.26);
+  border-radius: 9px;
+  color: var(--fm-accent);
+  background: rgba(121,183,255,.07);
+  box-shadow: inset 0 0 20px rgba(121,183,255,.025);
+}
+
+.fmV2LocationCopy {
+  min-width: 0;
+}
+
+.fmV2LocationCopy small,
+.fmV2LocationCopy strong {
+  display: block;
+}
+
+.fmV2LocationCopy small {
+  margin-bottom: 3px;
+  color: var(--fm-text-4);
+  font-size: 7px;
+  font-weight: 760;
+  letter-spacing: .18em;
+}
+
+.fmV2LocationCopy strong {
+  overflow: hidden;
+  color: #eef3f8;
+  font-size: 10px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fmV2LocationCopy strong i {
+  margin: 0 6px;
+  color: #3d4854;
+  font-style: normal;
+}
+
+.fmV2LocationCopy strong span {
+  color: #8e9aa7;
+  font-weight: 520;
+}
+
+.fmV2Search {
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 11px;
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 9px;
+  align-items: center;
+  border: 1px solid rgba(173,190,211,.14);
+  border-radius: 10px;
+  color: #8693a0;
+  background: linear-gradient(180deg, rgba(6,9,13,.82), rgba(8,11,16,.72));
+  box-shadow: inset 0 1px rgba(255,255,255,.018);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.fmV2Search:hover,
+.fmV2Search:focus-visible {
+  border-color: rgba(121,183,255,.34);
+  color: #c7d1dc;
+  background: rgba(13, 18, 25, .95);
+  outline: none;
+}
+
+.fmV2Search:active {
+  transform: translateY(1px);
+}
+
+.fmV2Search span {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fmV2Search kbd {
+  padding: 3px 7px;
+  border: 1px solid #2a3540;
+  border-bottom-color: #3a4652;
+  border-radius: 6px;
+  color: #73808c;
+  background: #080b0f;
+  font: 8px/1.3 "SFMono-Regular", Consolas, monospace;
+}
+
+.fmV2CommandActions {
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 5px;
+}
+
+.fmV2Pulse,
+.fmV2IconAction,
+.fmV2Clock {
+  min-height: 36px;
+  border: 1px solid rgba(170,188,210,.11);
+  border-radius: 9px;
+  background: rgba(255,255,255,.018);
+}
+
+.fmV2Pulse,
+.fmV2IconAction {
+  color: #84909d;
+  cursor: pointer;
+}
+
+.fmV2Pulse {
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #83c8a0;
+}
+
+.fmV2Pulse span {
+  font-size: 7px;
+  font-weight: 760;
+  letter-spacing: .08em;
+}
+
+.fmV2Pulse small {
+  color: #4f6b5b;
+  font-size: 7px;
+}
+
+.fmV2Pulse.offline {
+  color: #e48282;
+  border-color: rgba(239,133,133,.2);
+  background: rgba(97,32,36,.09);
+}
+
+.fmV2IconAction {
+  width: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  transition: color 130ms ease, border-color 130ms ease, background 130ms ease, transform 130ms ease;
+}
+
+.fmV2IconAction:hover,
+.fmV2IconAction:focus-visible,
+.fmV2IconAction.active,
+.fmV2Pulse:hover,
+.fmV2Pulse:focus-visible {
+  color: #e8edf3;
+  border-color: rgba(121,183,255,.26);
+  background: rgba(121,183,255,.065);
+  outline: none;
+}
+
+.fmV2IconAction:active {
+  transform: translateY(1px);
+}
+
+.fmV2Clock {
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #596674;
+  font: 8px/1.3 "SFMono-Regular", Consolas, monospace;
+}
+
+/* Premium navigation rail */
+.fmNavigationRail {
+  width: 234px !important;
+  padding: 18px 12px 14px !important;
+  border-right: 1px solid rgba(164,182,204,.12) !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(75, 122, 178, .09), transparent 23%),
+    linear-gradient(180deg, rgba(9,12,17,.99), rgba(6,8,11,.995)) !important;
+  box-shadow: 14px 0 50px rgba(0,0,0,.22) !important;
+}
+
+.fmNavigationBrand {
+  min-height: 58px !important;
+  border-bottom-color: rgba(158,177,200,.1) !important;
+}
+
+.fmNavigationBrandMark {
+  position: relative;
+  border-color: rgba(182,204,229,.32) !important;
+  border-radius: 10px;
+  color: #f1f6fb !important;
+  background: linear-gradient(145deg, rgba(121,183,255,.12), rgba(255,255,255,.025));
+  box-shadow: inset 0 1px rgba(255,255,255,.05), 0 8px 20px rgba(0,0,0,.2);
+}
+
+.fmNavigationBrandMark::after {
+  content: '';
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid #0a0d11;
+  border-radius: 50%;
+  background: var(--fm-positive);
+  box-shadow: 0 0 12px rgba(127,214,160,.58);
+}
+
+.fmNavigationPrimary button {
+  min-height: 51px !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.fmNavigationPrimary button:hover,
+.fmNavigationPrimary button:focus-visible {
+  border-color: rgba(164,183,205,.11) !important;
+  background: rgba(255,255,255,.027) !important;
+  transform: translateX(1px);
+}
+
+.fmNavigationPrimary button.active {
+  border-color: rgba(121,183,255,.17) !important;
+  background: linear-gradient(90deg, rgba(121,183,255,.105), rgba(121,183,255,.02)) !important;
+  box-shadow: inset 2px 0 0 var(--fm-accent), inset 0 1px rgba(255,255,255,.02) !important;
+}
+
+.fmNavigationPrimary button.active .fmNavigationIcon,
+.fmNavigationAdvancedList button.active .fmNavigationIcon {
+  color: var(--fm-accent) !important;
+}
+
+.fmNavigationText strong {
+  font-size: 10px !important;
+  letter-spacing: .01em;
+}
+
+.fmNavigationText small {
+  color: #53606d !important;
+  font-size: 7px !important;
+}
+
+.fmNavigationSectionLabel {
+  color: #46515d !important;
+  letter-spacing: .19em !important;
+}
+
+.fmNavigationAdvanced {
+  border-top-color: rgba(158,177,200,.09) !important;
+}
+
+.fmNavigationAdvancedToggle,
+.fmNavigationAdvancedList button {
+  border-radius: 8px !important;
+}
+
+.fmNavigationFooter {
+  border-top-color: rgba(158,177,200,.09) !important;
+}
+
+/* Align the old shell with the visual rail. */
+.shell {
+  grid-template-columns: 234px minmax(0, 1fr) !important;
+}
+
+.shell main {
+  position: relative;
+  z-index: 1;
+  max-width: 1660px !important;
+  padding: 96px 34px 64px !important;
+}
+
+/* Dashboard tabs become a persistent workspace switcher. */
+.dashboardPageTabs {
+  position: sticky;
+  z-index: 42;
+  top: 80px;
+  margin: 0 0 18px;
+  padding: 6px !important;
+  border: 1px solid rgba(160,178,200,.12) !important;
+  border-radius: 12px !important;
+  background: rgba(8, 11, 15, .82) !important;
+  backdrop-filter: blur(18px) saturate(130%);
+  box-shadow: 0 10px 32px rgba(0,0,0,.2);
+}
+
+.dashboardPageTab {
+  min-height: 34px !important;
+  padding: 0 11px !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  color: #6f7b88 !important;
+  background: transparent !important;
+  transition: color 130ms ease, background 130ms ease, border-color 130ms ease;
+}
+
+.dashboardPageTab:hover,
+.dashboardPageTab:focus-visible {
+  color: #d9e0e7 !important;
+  background: rgba(255,255,255,.03) !important;
+  outline: none !important;
+}
+
+.dashboardPageTab.active,
+.dashboardPageTab[aria-selected='true'] {
+  color: #eef4fa !important;
+  border-color: rgba(121,183,255,.16) !important;
+  background: linear-gradient(180deg, rgba(121,183,255,.10), rgba(121,183,255,.035)) !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.025);
+}
+
+.dashboardPageTabsMore > summary {
+  min-height: 34px !important;
+  border-color: rgba(160,178,200,.12) !important;
+  border-radius: 8px !important;
+  background: rgba(255,255,255,.018) !important;
+}
+
+/* Universal card system */
+.panel,
+.metric,
+.parameter,
+.hypothesis,
+.engineeringNote,
+.mlProtocolNote,
+.fmWorkInbox,
+.fmSelectionInspector,
+.fmExperienceGuide,
+.fmExperienceSearchDialog {
+  border-color: var(--fm-border) !important;
+  background:
+    linear-gradient(145deg, rgba(15,20,27,.94), rgba(9,13,18,.9)) !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.018), var(--fm-shadow-sm);
+}
+
+.panel,
+.metric {
+  border-radius: var(--fm-radius) !important;
+}
+
+.panel {
+  position: relative;
+  overflow: clip;
+  transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.panel::before,
+.metric::before {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(120deg, rgba(255,255,255,.022), transparent 24%, transparent 78%, rgba(121,183,255,.018));
+}
+
+.panel:hover {
+  border-color: rgba(160,181,205,.19) !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.025), 0 16px 42px rgba(0,0,0,.25);
+}
+
+.metric {
+  position: relative;
+  min-height: 122px !important;
+  overflow: hidden;
+}
+
+.metric::after {
+  content: '';
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 0;
+  height: 1px;
+  opacity: .32;
+  background: linear-gradient(90deg, transparent, var(--fm-accent), transparent);
+}
+
+.metric strong,
+.healthNumber,
+.warningGaugeNumber,
+.revisionHero strong,
+.failureRateBig {
+  color: #f5f8fb;
+  text-shadow: 0 10px 32px rgba(0,0,0,.26);
+}
+
+.metricIcon,
+.signalIcon,
+.fmExperienceStepIcon,
+.fmExperienceDestinationIcon {
+  color: #90a0b2 !important;
+  border-color: rgba(160,181,205,.13) !important;
+  background: rgba(255,255,255,.018) !important;
+}
+
+/* Typography hierarchy */
+header h1,
+h1 {
+  color: #f4f7fa;
+  font-weight: 610 !important;
+  letter-spacing: -.045em !important;
+}
+
+.eyebrow,
+.panelTitle span {
+  color: #65717e !important;
+  font-weight: 720;
+  letter-spacing: .2em !important;
+}
+
+.panelTitle h2,
+.panelTitleRow h2 {
+  color: #e8edf2;
+  letter-spacing: -.018em;
+}
+
+.muted,
+.empty {
+  color: #6b7784 !important;
+}
+
+/* Status semantics */
+.live {
+  border-color: rgba(160,178,200,.14) !important;
+  background: rgba(255,255,255,.018);
+}
+
+.live.on {
+  color: #a9e6bc !important;
+  border-color: rgba(127,214,160,.18) !important;
+  background: rgba(127,214,160,.045) !important;
+}
+
+.live.on span {
+  background: var(--fm-positive) !important;
+  box-shadow: 0 0 14px rgba(127,214,160,.7) !important;
+}
+
+.healthy,
+.healthyDot {
+  background: #8bd6a8 !important;
+}
+
+.degraded,
+.degradedDot {
+  background: #d7ae68 !important;
+}
+
+.critical,
+.criticalDot {
+  background: #e27575 !important;
+}
+
+.hot {
+  color: #f0c27a !important;
+}
+
+/* Row interaction: make data surfaces feel selectable and intentional. */
+.alertRow,
+.cohortRow,
+.failureRow,
+.reliabilityTableRow,
+.predictionRow,
+.baselineRow,
+.qualificationRow,
+.importanceRow,
+.fmWorkInboxList > button {
+  transition: background 130ms ease, border-color 130ms ease, transform 130ms ease;
+}
+
+.alertRow:hover,
+.cohortRow:hover,
+.failureRow:hover,
+.reliabilityTableRow:hover,
+.predictionRow:hover {
+  background: linear-gradient(90deg, rgba(121,183,255,.045), transparent 82%);
+}
+
+.predictionSelectable:focus-visible,
+.failureRow[role='button']:focus-visible,
+.alertRow[role='button']:focus-visible {
+  outline: 1px solid rgba(121,183,255,.48) !important;
+  outline-offset: 3px;
+}
+
+/* Better empty and waiting states */
+.empty,
+.historyEmpty,
+.modelWaiting,
+.mlWaitingPanel {
+  border-radius: 11px;
+}
+
+.empty {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  border: 1px dashed rgba(160,178,200,.10);
+  background: rgba(255,255,255,.012);
+}
+
+/* Context surfaces become cleaner and more layered. */
+.fmWorkInboxBackdrop,
+.fmSelectionInspectorBackdrop,
+.fmExperienceBackdrop,
+.fmExperienceSearchBackdrop {
+  background: rgba(3,5,8,.68) !important;
+  backdrop-filter: blur(9px) saturate(120%) !important;
+}
+
+.fmWorkInbox,
+.fmSelectionInspector,
+.fmExperienceGuide {
+  border-left-color: rgba(166,186,209,.18) !important;
+  box-shadow: -30px 0 90px rgba(0,0,0,.52) !important;
+}
+
+.fmExperienceSearchDialog {
+  border-radius: 16px !important;
+  box-shadow: var(--fm-shadow-strong) !important;
+}
+
+.fmExperienceDestination:hover,
+.fmExperienceDestination:focus-visible {
+  background: linear-gradient(90deg, rgba(121,183,255,.075), rgba(255,255,255,.016)) !important;
+}
+
+.fmExperienceFloatingHelp {
+  right: 20px !important;
+  bottom: 20px !important;
+  border-color: rgba(160,178,200,.16) !important;
+  background: rgba(11,15,20,.88) !important;
+  backdrop-filter: blur(16px);
+}
+
+/* Density controls */
+html[data-fm-density='compact'] .panel {
+  padding: 17px !important;
+}
+
+html[data-fm-density='compact'] .metric {
+  min-height: 102px !important;
+  padding: 15px !important;
+}
+
+html[data-fm-density='compact'] .alertRow,
+html[data-fm-density='compact'] .cohortRow,
+html[data-fm-density='compact'] .failureRow,
+html[data-fm-density='compact'] .reliabilityTableRow,
+html[data-fm-density='compact'] .predictionRow {
+  padding-top: 9px !important;
+  padding-bottom: 9px !important;
+}
+
+/* Focus mode */
+html[data-fm-focus='true'] .fmNavigationRail {
+  opacity: 0;
+  transform: translateX(-105%);
+  pointer-events: none;
+}
+
+html[data-fm-focus='true'] .shell {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+html[data-fm-focus='true'] .fmV2CommandBar {
+  left: 18px;
+}
+
+html[data-fm-focus='true'] .shell main {
+  max-width: 1740px !important;
+}
+
+.fmNavigationRail {
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+/* Mobile navigation */
+.fmV2MobileNav {
+  display: none;
+}
+
+@media (max-width: 1180px) {
+  .fmV2CommandBar {
+    grid-template-columns: minmax(170px, 230px) minmax(220px, 1fr) auto;
+  }
+
+  .fmV2Pulse span,
+  .fmV2Pulse small,
+  .fmV2Clock {
+    display: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  .fmV2CommandBar {
+    left: 82px;
+    grid-template-columns: minmax(150px, 210px) minmax(190px, 1fr) auto;
+  }
+
+  .shell {
+    grid-template-columns: 72px minmax(0, 1fr) !important;
+  }
+
+  .shell main {
+    padding: 92px 22px 58px !important;
+  }
+
+  .dashboardPageTabs {
+    top: 78px;
+  }
+}
+
+@media (max-width: 760px) {
+  .fmV2LocationCopy strong span,
+  .fmV2LocationCopy strong i,
+  .fmV2Pulse,
+  .fmV2CommandActions .fmV2IconAction:nth-of-type(2),
+  .fmV2CommandActions .fmV2IconAction:nth-of-type(3) {
+    display: none;
+  }
+
+  .fmV2CommandBar {
+    grid-template-columns: minmax(110px, 155px) 1fr auto;
+  }
+
+  .fmV2Search span {
+    font-size: 0;
+  }
+
+  .fmV2Search span::after {
+    content: 'Search';
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 650px) {
+  .fmV2CommandBar {
+    top: 8px;
+    left: 8px !important;
+    right: 8px;
+    min-height: 50px;
+    grid-template-columns: minmax(105px, 1fr) minmax(120px, 1.35fr) auto;
+    border-radius: 13px;
+  }
+
+  .fmV2LocationMark,
+  .fmV2Search kbd,
+  .fmV2CommandActions .fmV2IconAction:not(:first-of-type) {
+    display: none;
+  }
+
+  .fmV2CommandActions {
+    gap: 0;
+  }
+
+  .shell {
+    display: block !important;
+  }
+
+  .shell main {
+    padding: 76px 12px 96px !important;
+  }
+
+  .dashboardPageTabs {
+    top: 66px;
+    margin-bottom: 12px;
+    overflow-x: auto;
+  }
+
+  .dashboardPageTabsMore {
+    flex: 0 0 auto;
+  }
+
+  .fmV2MobileNav {
+    position: fixed;
+    z-index: 98;
+    left: 10px;
+    right: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    min-height: 62px;
+    padding: 6px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 3px;
+    border: 1px solid rgba(168,188,211,.18);
+    border-radius: 17px;
+    background: rgba(9,13,18,.92);
+    backdrop-filter: blur(24px) saturate(140%);
+    box-shadow: 0 18px 50px rgba(0,0,0,.46), inset 0 1px rgba(255,255,255,.025);
+  }
+
+  .fmV2MobileNav button {
+    min-width: 0;
+    min-height: 49px;
+    padding: 5px 2px;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 3px;
+    border: 0;
+    border-radius: 11px;
+    color: #62707e;
+    background: transparent;
+  }
+
+  .fmV2MobileNav button.active {
+    color: #dce9f7;
+    background: linear-gradient(180deg, rgba(121,183,255,.11), rgba(121,183,255,.035));
+  }
+
+  .fmV2MobileNav small {
+    overflow: hidden;
+    max-width: 100%;
+    font-size: 7px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fmExperienceFloatingHelp {
+    bottom: 88px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .001ms !important;
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
