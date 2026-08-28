@@ -15,8 +15,15 @@ export type DashboardPage =
 type DashboardTab = {
   id: string;
   label: string;
-  primary?: boolean;
 };
+
+const DIAGNOSTIC_PRIMARY_TAB_IDS = new Set([
+  'overview',
+  'vehicle-investigation',
+  'cases',
+  'fleet-command',
+  'platform',
+]);
 
 export const PAGE_TABS: Record<DashboardPage, DashboardTab[]> = {
   fleet: [
@@ -67,11 +74,11 @@ export const PAGE_TABS: Record<DashboardPage, DashboardTab[]> = {
     { id: 'predictions', label: 'Predictions' },
   ],
   diagnostics: [
-    { id: 'overview', label: 'Overview', primary: true },
-    { id: 'vehicle-investigation', label: 'Investigate', primary: true },
-    { id: 'cases', label: 'Cases', primary: true },
-    { id: 'fleet-command', label: 'Actions & Outcomes', primary: true },
-    { id: 'platform', label: 'Platform', primary: true },
+    { id: 'overview', label: 'Overview' },
+    { id: 'vehicle-investigation', label: 'Investigate' },
+    { id: 'cases', label: 'Cases' },
+    { id: 'fleet-command', label: 'Actions & Outcomes' },
+    { id: 'platform', label: 'Platform' },
     { id: 'hypotheses', label: 'Hypotheses' },
     { id: 'benchmark', label: 'Benchmark' },
     { id: 'incident-queue', label: 'Incident Queue' },
@@ -111,9 +118,13 @@ export function DashboardPageTabs({
 }) {
   const tabs = PAGE_TABS[page];
   const primaryTabs =
-    page === 'diagnostics' ? tabs.filter(tab => tab.primary) : tabs;
+    page === 'diagnostics'
+      ? tabs.filter(tab => DIAGNOSTIC_PRIMARY_TAB_IDS.has(tab.id))
+      : tabs;
   const advancedTabs =
-    page === 'diagnostics' ? tabs.filter(tab => !tab.primary) : [];
+    page === 'diagnostics'
+      ? tabs.filter(tab => !DIAGNOSTIC_PRIMARY_TAB_IDS.has(tab.id))
+      : [];
   const activeAdvanced = advancedTabs.find(tab => tab.id === active);
   const activeIndex = Math.max(
     0,
