@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
+import { FleetMindBreadcrumbs } from './FleetMindBreadcrumbs';
 import { FleetMindExperience } from './FleetMindExperience';
 import { FleetMindSelectionInspector } from './FleetMindSelectionInspector';
 import { FleetMindWorkInbox } from './FleetMindWorkInbox';
@@ -9,6 +10,7 @@ import './styles.css';
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <FleetMindExperience />
+    <FleetMindBreadcrumbs />
     <FleetMindWorkInbox />
     <FleetMindSelectionInspector />
     <App />
