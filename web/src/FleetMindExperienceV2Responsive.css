@@ -55,6 +55,16 @@ html[data-fm-focus='true'] .fmBreadcrumbs {
   .fmBreadcrumbs {
     display: none !important;
   }
+
+  /* Keep My Work and focus mode available; drop help/density first. */
+  .fmV2CommandActions .fmV2IconAction:nth-of-type(2) {
+    display: grid !important;
+  }
+
+  .fmV2CommandActions .fmV2IconAction:nth-of-type(3),
+  .fmV2CommandActions .fmV2IconAction:nth-of-type(4) {
+    display: none !important;
+  }
 }
 
 @media (max-width: 650px) {
@@ -64,6 +74,10 @@ html[data-fm-focus='true'] .fmBreadcrumbs {
 
   .dashboardPageTabs {
     top: 66px !important;
+  }
+
+  .fmV2CommandActions .fmV2IconAction {
+    display: none !important;
   }
 
   html[data-fm-focus='true'] .fmV2CommandBar {
