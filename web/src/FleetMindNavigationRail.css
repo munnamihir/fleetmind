@@ -1,0 +1,316 @@
+.fmNavigationRail {
+  position: fixed;
+  z-index: 66;
+  inset: 0 auto 0 0;
+  width: 230px;
+  padding: 24px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #20242a;
+  background: linear-gradient(180deg, rgba(9, 11, 14, .99), rgba(7, 8, 10, .99));
+  box-shadow: 10px 0 34px rgba(0, 0, 0, .18);
+}
+
+.fmNavigationBrand {
+  min-height: 54px;
+  padding: 0 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid #1e2329;
+}
+
+.fmNavigationBrandMark {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d8dde5;
+  color: #eef1f4;
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.fmNavigationBrand b,
+.fmNavigationBrand span {
+  display: block;
+}
+
+.fmNavigationBrand b {
+  color: #e7eaed;
+  font-size: 11px;
+  letter-spacing: .17em;
+}
+
+.fmNavigationBrand span {
+  margin-top: 3px;
+  color: #5f6874;
+  font-size: 7px;
+  letter-spacing: .22em;
+}
+
+.fmNavigationSectionLabel {
+  padding: 16px 11px 6px;
+  color: #4f5964;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: .15em;
+}
+
+.fmNavigationPrimary,
+.fmNavigationAdvancedList {
+  display: grid;
+  gap: 3px;
+}
+
+.fmNavigationPrimary button {
+  position: relative;
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 9px;
+  display: grid;
+  grid-template-columns: 28px 1fr 14px;
+  gap: 7px;
+  align-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: #7c8691;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fmNavigationPrimary button:hover,
+.fmNavigationPrimary button:focus-visible,
+.fmNavigationPrimary button.active {
+  color: #e4e8ec;
+  background: #14181d;
+  outline: none;
+}
+
+.fmNavigationPrimary button.active {
+  box-shadow: inset 2px 0 0 #dfe3e7;
+}
+
+.fmNavigationIcon {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  color: #7e8995;
+}
+
+.fmNavigationText {
+  min-width: 0;
+}
+
+.fmNavigationText strong,
+.fmNavigationText small {
+  display: block;
+}
+
+.fmNavigationText strong {
+  color: inherit;
+  font-size: 10px;
+  font-weight: 560;
+}
+
+.fmNavigationText small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: #555f6a;
+  font-size: 7px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fmNavigationPrimary button:hover .fmNavigationText small,
+.fmNavigationPrimary button.active .fmNavigationText small {
+  color: #6f7984;
+}
+
+.fmNavigationActiveArrow {
+  color: #8e98a3;
+}
+
+.fmNavigationAdvanced {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #1e2329;
+}
+
+.fmNavigationAdvancedToggle {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  border-radius: 7px;
+  color: #66717c;
+  background: transparent;
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.fmNavigationAdvancedToggle > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fmNavigationAdvancedToggle:hover,
+.fmNavigationAdvancedToggle:focus-visible {
+  color: #d1d6db;
+  background: #12161a;
+  outline: none;
+}
+
+.fmNavigationAdvancedToggle > svg {
+  transition: transform 120ms ease;
+}
+
+.fmNavigationAdvancedToggle > svg.open {
+  transform: rotate(180deg);
+}
+
+.fmNavigationAdvancedList {
+  padding: 4px 0 0 7px;
+}
+
+.fmNavigationAdvancedList button {
+  min-height: 31px;
+  padding: 0 8px;
+  display: grid;
+  grid-template-columns: 27px 1fr;
+  gap: 5px;
+  align-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: #616b76;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-size: 8px;
+}
+
+.fmNavigationAdvancedList button:hover,
+.fmNavigationAdvancedList button:focus-visible,
+.fmNavigationAdvancedList button.active {
+  color: #cbd1d7;
+  background: #111419;
+  outline: none;
+}
+
+.fmNavigationAdvancedList button.active {
+  box-shadow: inset 2px 0 0 #6f7985;
+}
+
+.fmNavigationFooter {
+  margin-top: auto;
+  padding: 12px 8px 0;
+  border-top: 1px solid #1e2329;
+}
+
+.fmNavigationFooter > div,
+.fmNavigationFooter p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.fmNavigationFooter > div {
+  color: #5c6671;
+  font-size: 8px;
+}
+
+.fmNavigationFooter p {
+  margin: 9px 0 0;
+  align-items: flex-start;
+  color: #4e5863;
+  font-size: 7px;
+  line-height: 1.45;
+}
+
+/* The original sidebar stays mounted because it owns the existing React page
+   state. Phase 10 visually replaces it while delegating navigation to those
+   existing buttons, which avoids changing backend or dashboard semantics. */
+.shell > .sidebar {
+  visibility: hidden;
+}
+
+@media (max-width: 1000px) {
+  .fmNavigationRail {
+    width: 72px;
+    padding: 22px 9px 14px;
+  }
+
+  .fmNavigationBrand {
+    padding: 0 10px 18px;
+    justify-content: center;
+  }
+
+  .fmNavigationBrand > div:last-child,
+  .fmNavigationSectionLabel,
+  .fmNavigationText,
+  .fmNavigationActiveArrow,
+  .fmNavigationAdvancedToggle span:not(:first-child),
+  .fmNavigationFooter {
+    display: none;
+  }
+
+  .fmNavigationPrimary button {
+    min-height: 42px;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 6px;
+  }
+
+  .fmNavigationPrimary button.active {
+    box-shadow: inset 2px 0 0 #dfe3e7;
+  }
+
+  .fmNavigationAdvancedToggle {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .fmNavigationAdvancedToggle > span {
+    display: grid;
+    place-items: center;
+  }
+
+  .fmNavigationAdvancedToggle > svg {
+    display: none;
+  }
+
+  .fmNavigationAdvancedList {
+    padding-left: 0;
+  }
+
+  .fmNavigationAdvancedList button {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 0;
+  }
+
+  .fmNavigationAdvancedList button > span:last-child {
+    display: none;
+  }
+}
+
+@media (max-width: 650px) {
+  .fmNavigationRail {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fmNavigationAdvancedToggle > svg {
+    transition: none;
+  }
+}
