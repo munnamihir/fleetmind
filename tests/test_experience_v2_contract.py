@@ -6,6 +6,9 @@ MAIN = (ROOT / 'web' / 'src' / 'main.tsx').read_text()
 V2 = (ROOT / 'web' / 'src' / 'FleetMindExperienceV2.tsx').read_text()
 CSS = (ROOT / 'web' / 'src' / 'FleetMindExperienceV2.css').read_text()
 RESPONSIVE = (ROOT / 'web' / 'src' / 'FleetMindExperienceV2Responsive.css').read_text()
+WORK_INBOX = (ROOT / 'web' / 'src' / 'FleetMindWorkInbox.tsx').read_text()
+DOCKERFILE = (ROOT / 'web' / 'Dockerfile').read_text()
+DOCKERIGNORE = (ROOT / 'web' / '.dockerignore').read_text()
 
 
 class FleetMindExperienceV2ContractTests(unittest.TestCase):
@@ -49,6 +52,17 @@ class FleetMindExperienceV2ContractTests(unittest.TestCase):
     def test_focus_mode_removes_hidden_legacy_sidebar_from_grid_flow(self):
         self.assertIn("html[data-fm-focus='true'] .shell > .sidebar", RESPONSIVE)
         self.assertIn('display: none !important', RESPONSIVE)
+
+    def test_my_work_outcomes_are_pinned_to_resolved_run(self):
+        self.assertIn('runId: number', WORK_INBOX)
+        self.assertIn('outcomes/summary?run_id=', WORK_INBOX)
+        self.assertIn('String(nextCommand.runId)', WORK_INBOX)
+
+    def test_web_container_uses_platform_correct_dependencies(self):
+        self.assertIn('COPY package.json ./', DOCKERFILE)
+        self.assertIn('npm install --include=optional', DOCKERFILE)
+        self.assertIn('node_modules', DOCKERIGNORE)
+        self.assertIn('package-lock.json', DOCKERIGNORE)
 
     def test_v2_does_not_introduce_autonomous_workflow_language(self):
         lowered = V2.lower()
