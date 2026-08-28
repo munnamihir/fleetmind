@@ -1,0 +1,86 @@
+html[data-fm-focus='true'] .shell > .sidebar {
+  display: none !important;
+}
+
+.fmBreadcrumbs {
+  top: 75px !important;
+  left: 252px !important;
+  max-width: calc(100vw - 290px) !important;
+}
+
+.shell main {
+  padding-top: 112px !important;
+}
+
+.dashboardPageTabs {
+  top: 103px !important;
+}
+
+html[data-fm-focus='true'] .fmBreadcrumbs {
+  left: 22px !important;
+}
+
+@media (max-width: 1000px) {
+  .fmNavigationRail {
+    width: 72px !important;
+  }
+
+  .fmBreadcrumbs {
+    left: 92px !important;
+    max-width: calc(100vw - 116px) !important;
+  }
+
+  .shell main {
+    padding-top: 108px !important;
+  }
+
+  .dashboardPageTabs {
+    top: 101px !important;
+  }
+
+  html[data-fm-focus='true'] .fmV2CommandBar {
+    left: 18px !important;
+  }
+
+  html[data-fm-focus='true'] .fmBreadcrumbs {
+    left: 22px !important;
+  }
+
+  html[data-fm-focus='true'] .shell {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .fmBreadcrumbs {
+    display: none !important;
+  }
+
+  /* Keep My Work and focus mode available; drop help/density first. */
+  .fmV2CommandActions .fmV2IconAction:nth-of-type(2) {
+    display: grid !important;
+  }
+
+  .fmV2CommandActions .fmV2IconAction:nth-of-type(3),
+  .fmV2CommandActions .fmV2IconAction:nth-of-type(4) {
+    display: none !important;
+  }
+}
+
+@media (max-width: 650px) {
+  .shell main {
+    padding-top: 76px !important;
+  }
+
+  .dashboardPageTabs {
+    top: 66px !important;
+  }
+
+  .fmV2CommandActions .fmV2IconAction {
+    display: none !important;
+  }
+
+  html[data-fm-focus='true'] .fmV2CommandBar {
+    left: 8px !important;
+  }
+}

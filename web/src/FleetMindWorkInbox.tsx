@@ -16,6 +16,7 @@ import './FleetMindWorkInbox.css';
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 type CommandSummary = {
+  runId: number;
   attentionRequired: number;
   workflow: {
     pendingApproval: number;
@@ -83,11 +84,17 @@ export function FleetMindWorkInbox() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextCommand, nextQueue, nextOutcomes] = await Promise.all([
+      const [nextCommand, nextQueue] = await Promise.all([
         getJson<CommandSummary>('/api/v1/diagnostics/fleet-command/summary'),
         getJson<QueueSummary>('/api/v1/diagnostics/decision-queue/summary'),
-        getJson<OutcomeSummary>('/api/v1/diagnostics/closed-loop/outcomes/summary'),
       ]);
+
+      const nextOutcomes = await getJson<OutcomeSummary>(
+        `/api/v1/diagnostics/closed-loop/outcomes/summary?run_id=${encodeURIComponent(
+          String(nextCommand.runId),
+        )}`,
+      );
+
       setCommand(nextCommand);
       setQueue(nextQueue);
       setOutcomes(nextOutcomes);
