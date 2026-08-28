@@ -1,0 +1,23 @@
+html[data-fm-focus='true'] .shell > .sidebar {
+  display: none !important;
+}
+
+@media (max-width: 1000px) {
+  .fmNavigationRail {
+    width: 72px !important;
+  }
+
+  html[data-fm-focus='true'] .fmV2CommandBar {
+    left: 18px !important;
+  }
+
+  html[data-fm-focus='true'] .shell {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 650px) {
+  html[data-fm-focus='true'] .fmV2CommandBar {
+    left: 8px !important;
+  }
+}
