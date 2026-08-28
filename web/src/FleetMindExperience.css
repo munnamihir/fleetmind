@@ -1,0 +1,617 @@
+.srOnly {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.fmExperienceBar {
+  position: fixed;
+  z-index: 70;
+  top: 14px;
+  left: 250px;
+  right: 20px;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: minmax(220px, 340px) 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px;
+  border: 1px solid #262b32;
+  border-radius: 12px;
+  background: rgba(10, 12, 15, 0.93);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.25);
+}
+
+.fmExperienceBar button {
+  border: 0;
+  color: #aeb6c0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.fmExperienceSearchButton {
+  min-height: 32px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #292f37 !important;
+  border-radius: 8px;
+  background: #111419 !important;
+  text-align: left;
+}
+
+.fmExperienceSearchButton span {
+  flex: 1;
+  color: #7d8792;
+  font-size: 11px;
+}
+
+.fmExperienceBar kbd,
+.fmExperienceSearchDialog kbd {
+  min-width: 20px;
+  padding: 2px 5px;
+  border: 1px solid #313740;
+  border-bottom-color: #3e454f;
+  border-radius: 5px;
+  color: #77818d;
+  background: #0b0d10;
+  font: 9px/1.4 "SFMono-Regular", Consolas, monospace;
+  text-align: center;
+}
+
+.fmExperienceQuickLinks {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fmExperienceQuickLinks::-webkit-scrollbar {
+  display: none;
+}
+
+.fmExperienceQuickLinks button,
+.fmExperienceGuideButton {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.fmExperienceQuickLinks button:hover,
+.fmExperienceQuickLinks button:focus-visible,
+.fmExperienceGuideButton:hover,
+.fmExperienceGuideButton:focus-visible {
+  color: #f1f4f7;
+  background: #171b20;
+  outline: none;
+}
+
+.fmExperienceGuideButton {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-left: 1px solid #252a31 !important;
+  border-radius: 0 7px 7px 0;
+}
+
+.fmExperienceFloatingHelp {
+  position: fixed;
+  z-index: 60;
+  right: 22px;
+  bottom: 22px;
+  min-height: 38px;
+  padding: 0 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #343a43;
+  border-radius: 999px;
+  color: #c5cbd3;
+  background: rgba(16, 19, 23, 0.95);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.fmExperienceFloatingHelp:hover,
+.fmExperienceFloatingHelp:focus-visible {
+  color: #fff;
+  border-color: #596370;
+  outline: none;
+}
+
+.fmExperienceBackdrop,
+.fmExperienceSearchBackdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  background: rgba(2, 3, 4, 0.64);
+  backdrop-filter: blur(4px);
+}
+
+.fmExperienceBackdrop {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.fmExperienceGuide {
+  width: min(470px, calc(100vw - 24px));
+  height: 100%;
+  padding: 24px;
+  overflow-y: auto;
+  border-left: 1px solid #2a3038;
+  background: linear-gradient(180deg, #101318 0%, #0b0d10 100%);
+  box-shadow: -24px 0 60px rgba(0, 0, 0, 0.45);
+}
+
+.fmExperienceGuideHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #22272e;
+}
+
+.fmExperienceGuideHeader span,
+.fmExperienceGuideStep span,
+.fmExperienceInterpretation span {
+  display: block;
+  margin-bottom: 5px;
+  color: #727c88;
+  font-size: 8px;
+  line-height: 1.3;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.fmExperienceGuideHeader h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 560;
+  letter-spacing: -0.03em;
+}
+
+.fmExperienceGuideHeader button,
+.fmExperienceSearchInputWrap button {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: #8b949f;
+  background: transparent;
+  cursor: pointer;
+}
+
+.fmExperienceGuideHeader button:hover,
+.fmExperienceGuideHeader button:focus-visible,
+.fmExperienceSearchInputWrap button:hover,
+.fmExperienceSearchInputWrap button:focus-visible {
+  color: #f4f6f8;
+  background: #181c21;
+  outline: none;
+}
+
+.fmExperienceGuideHero {
+  padding: 25px 0 18px;
+}
+
+.fmExperienceGuideHero h3 {
+  margin: 0 0 9px;
+  color: #eef1f4;
+  font-size: 24px;
+  line-height: 1.15;
+  font-weight: 540;
+  letter-spacing: -0.035em;
+}
+
+.fmExperienceGuideHero p,
+.fmExperienceGuideStep p,
+.fmExperienceInterpretation p {
+  margin: 0;
+  color: #858f9a;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.fmExperienceGuideStep {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid #1f242a;
+}
+
+.fmExperienceStepIcon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #293039;
+  border-radius: 8px;
+  color: #9ca6b1;
+  background: #12151a;
+}
+
+.fmExperienceInterpretation {
+  margin-top: 12px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 10px;
+  border: 1px solid #334038;
+  border-radius: 8px;
+  color: #9cc6a9;
+  background: rgba(24, 45, 31, 0.28);
+}
+
+.fmExperienceInterpretation span {
+  color: #8fb69b;
+}
+
+.fmExperienceGuideActions {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.fmExperienceGuideActions button {
+  min-height: 42px;
+  padding: 0 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #2c333b;
+  border-radius: 8px;
+  color: #a8b1bb;
+  background: #111419;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.fmExperienceGuideActions button:last-child {
+  color: #0b0d10;
+  border-color: #d7dce2;
+  background: #e6e9ed;
+}
+
+.fmExperienceSearchBackdrop {
+  display: grid;
+  place-items: start center;
+  padding: min(12vh, 110px) 16px 30px;
+}
+
+.fmExperienceSearchDialog {
+  width: min(720px, 100%);
+  max-height: min(720px, 78vh);
+  overflow: hidden;
+  border: 1px solid #30363f;
+  border-radius: 12px;
+  background: #0d1014;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.52);
+}
+
+.fmExperienceSearchInputWrap {
+  min-height: 58px;
+  padding: 0 14px 0 18px;
+  display: grid;
+  grid-template-columns: 22px 1fr 34px;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid #252b32;
+  color: #87919d;
+}
+
+.fmExperienceSearchInputWrap input {
+  width: 100%;
+  height: 56px;
+  border: 0;
+  outline: 0;
+  color: #edf0f3;
+  background: transparent;
+  font: 13px/1.3 inherit;
+}
+
+.fmExperienceSearchInputWrap input::placeholder {
+  color: #5e6874;
+}
+
+.fmExperienceSearchMeta {
+  min-height: 35px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #20252b;
+  color: #59636f;
+  font-size: 9px;
+}
+
+.fmExperienceSearchResults {
+  max-height: calc(min(720px, 78vh) - 94px);
+  overflow-y: auto;
+  padding: 7px;
+}
+
+.fmExperienceDestination {
+  width: 100%;
+  min-height: 72px;
+  padding: 11px;
+  display: grid;
+  grid-template-columns: 36px 1fr 20px;
+  gap: 10px;
+  align-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: #8a949f;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fmExperienceDestination:hover,
+.fmExperienceDestination:focus-visible {
+  color: #dfe4e9;
+  background: #15191e;
+  outline: none;
+}
+
+.fmExperienceDestinationIcon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #293039;
+  border-radius: 7px;
+  color: #909aa6;
+  background: #111419;
+}
+
+.fmExperienceDestinationText {
+  min-width: 0;
+}
+
+.fmExperienceDestinationText > span {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.fmExperienceDestinationText strong {
+  color: #d9dee4;
+  font-size: 11px;
+  font-weight: 540;
+}
+
+.fmExperienceDestinationText small {
+  color: #59636f;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.fmExperienceDestinationText p {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: #717b86;
+  font-size: 9px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fmExperienceNoResults {
+  min-height: 210px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #5d6772;
+  text-align: center;
+}
+
+.fmExperienceNoResults strong {
+  color: #b8c0c9;
+  font-size: 12px;
+}
+
+.fmExperienceNoResults span {
+  max-width: 340px;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+/* Phase 10 makes the existing technical tab strip easier to scan without
+   removing any underlying route. Primary tabs remain visible; the rest are
+   available from an explicit Advanced views disclosure. */
+.dashboardPageTabsPrimary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dashboardPageTabsMore {
+  position: relative;
+  margin-left: auto;
+}
+
+.dashboardPageTabsMore > summary {
+  min-height: 30px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #282e35;
+  border-radius: 7px;
+  color: #737d88;
+  background: #0e1115;
+  cursor: pointer;
+  font-size: 9px;
+  list-style: none;
+  white-space: nowrap;
+}
+
+.dashboardPageTabsMore > summary::-webkit-details-marker {
+  display: none;
+}
+
+.dashboardPageTabsMore[open] > summary,
+.dashboardPageTabsMore > summary:hover,
+.dashboardPageTabsMore > summary:focus-visible {
+  color: #e5e9ed;
+  border-color: #3a424d;
+  outline: none;
+}
+
+.dashboardPageTabsMoreMenu {
+  position: absolute;
+  z-index: 55;
+  top: calc(100% + 7px);
+  right: 0;
+  width: min(310px, calc(100vw - 32px));
+  max-height: 420px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid #303740;
+  border-radius: 9px;
+  background: #0d1014;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+
+.dashboardPageTabsMoreMenu button {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #7b8590;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.dashboardPageTabsMoreMenu button:hover,
+.dashboardPageTabsMoreMenu button:focus-visible,
+.dashboardPageTabsMoreMenu button.active {
+  color: #e9edf1;
+  background: #171b20;
+  outline: none;
+}
+
+@media (min-width: 1001px) {
+  .shell main {
+    padding-top: 84px;
+  }
+}
+
+@media (max-width: 1000px) {
+  .fmExperienceBar {
+    left: 86px;
+    grid-template-columns: minmax(180px, 280px) 1fr auto;
+  }
+
+  .fmExperienceQuickLinks button:nth-child(n + 5) {
+    display: none;
+  }
+
+  .shell main {
+    padding-top: 82px;
+  }
+}
+
+@media (max-width: 760px) {
+  .fmExperienceBar {
+    left: 82px;
+    right: 10px;
+    grid-template-columns: 1fr auto;
+  }
+
+  .fmExperienceQuickLinks {
+    display: none;
+  }
+
+  .fmExperienceGuideButton span {
+    display: none;
+  }
+
+  .fmExperienceGuideButton {
+    width: 34px;
+    justify-content: center;
+    border-left: 0 !important;
+    border-radius: 7px;
+  }
+
+  .fmExperienceSearchMeta span:last-child {
+    display: none;
+  }
+
+  .fmExperienceGuideActions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 650px) {
+  .fmExperienceBar {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+  }
+
+  .shell main {
+    padding-top: 76px;
+  }
+
+  .fmExperienceFloatingHelp {
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .fmExperienceFloatingHelp span {
+    display: none;
+  }
+
+  .fmExperienceFloatingHelp {
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .dashboardPageTabsMoreMenu {
+    position: fixed;
+    top: auto;
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    width: auto;
+    max-height: 55vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fmExperienceGuide,
+  .fmExperienceSearchDialog,
+  .fmExperienceFloatingHelp {
+    scroll-behavior: auto;
+  }
+}

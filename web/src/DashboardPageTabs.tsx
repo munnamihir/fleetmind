@@ -2,7 +2,6 @@ import { type KeyboardEvent } from 'react';
 
 import './DashboardPageTabs.css';
 
-
 export type DashboardPage =
   | 'fleet'
   | 'incidents'
@@ -16,6 +15,7 @@ export type DashboardPage =
 type DashboardTab = {
   id: string;
   label: string;
+  primary?: boolean;
 };
 
 export const PAGE_TABS: Record<DashboardPage, DashboardTab[]> = {
@@ -67,20 +67,20 @@ export const PAGE_TABS: Record<DashboardPage, DashboardTab[]> = {
     { id: 'predictions', label: 'Predictions' },
   ],
   diagnostics: [
-    { id: 'overview', label: 'Overview' },
+    { id: 'overview', label: 'Overview', primary: true },
+    { id: 'vehicle-investigation', label: 'Investigate', primary: true },
+    { id: 'cases', label: 'Cases', primary: true },
+    { id: 'fleet-command', label: 'Actions & Outcomes', primary: true },
+    { id: 'platform', label: 'Platform', primary: true },
     { id: 'hypotheses', label: 'Hypotheses' },
     { id: 'benchmark', label: 'Benchmark' },
     { id: 'incident-queue', label: 'Incident Queue' },
-    { id: 'vehicle-investigation', label: 'Vehicle Investigation' },
-    { id: 'cases', label: 'Cases' },
     { id: 'fleet-patterns', label: 'Fleet Patterns' },
     { id: 'prognostics', label: 'Prognostics' },
     { id: 'automation', label: 'Automation' },
     { id: 'fleet-decisions', label: 'Fleet Decisions' },
     { id: 'vehicle-twin', label: 'Vehicle Twin' },
     { id: 'planning', label: 'Planning' },
-    { id: 'fleet-command', label: 'Fleet Command' },
-    { id: 'platform', label: 'Platform' },
     { id: 'transitions', label: 'Transitions' },
     { id: 'episodes', label: 'Episodes' },
     { id: 'events', label: 'Events' },
@@ -100,7 +100,6 @@ export const DEFAULT_DASHBOARD_VIEW: Record<DashboardPage, string> = {
   diagnostics: 'overview',
 };
 
-
 export function DashboardPageTabs({
   page,
   active,
@@ -111,9 +110,14 @@ export function DashboardPageTabs({
   onChange: (view: string) => void;
 }) {
   const tabs = PAGE_TABS[page];
+  const primaryTabs =
+    page === 'diagnostics' ? tabs.filter(tab => tab.primary) : tabs;
+  const advancedTabs =
+    page === 'diagnostics' ? tabs.filter(tab => !tab.primary) : [];
+  const activeAdvanced = advancedTabs.find(tab => tab.id === active);
   const activeIndex = Math.max(
     0,
-    tabs.findIndex(tab => tab.id === active),
+    primaryTabs.findIndex(tab => tab.id === active),
   );
 
   function onKeyDown(
@@ -123,23 +127,23 @@ export function DashboardPageTabs({
     let target = index;
 
     if (event.key === 'ArrowRight') {
-      target = (index + 1) % tabs.length;
+      target = (index + 1) % primaryTabs.length;
     } else if (event.key === 'ArrowLeft') {
-      target = (index - 1 + tabs.length) % tabs.length;
+      target = (index - 1 + primaryTabs.length) % primaryTabs.length;
     } else if (event.key === 'Home') {
       target = 0;
     } else if (event.key === 'End') {
-      target = tabs.length - 1;
+      target = primaryTabs.length - 1;
     } else {
       return;
     }
 
     event.preventDefault();
-    onChange(tabs[target].id);
+    onChange(primaryTabs[target].id);
 
     const buttons = event.currentTarget
       .parentElement
-      ?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+      ?.querySelectorAll<HTMLButtonElement>('[role="tab"]:not([hidden])');
 
     buttons?.[target]?.focus();
   }
@@ -147,27 +151,74 @@ export function DashboardPageTabs({
   return (
     <div
       className={`dashboardPageTabs dashboardPageTabs-${page}`}
-      role="tablist"
       aria-label={`${page} dashboard views`}
     >
-      {tabs.map((tab, index) => (
-        <button
-          key={tab.id}
-          type="button"
-          role="tab"
-          aria-selected={active === tab.id}
-          tabIndex={activeIndex === index ? 0 : -1}
-          className={
-            active === tab.id
-              ? 'dashboardPageTab active'
-              : 'dashboardPageTab'
-          }
-          onClick={() => onChange(tab.id)}
-          onKeyDown={event => onKeyDown(event, index)}
-        >
-          {tab.label}
-        </button>
-      ))}
+      <div
+        className="dashboardPageTabsPrimary"
+        role="tablist"
+        aria-label={`${page} primary views`}
+      >
+        {primaryTabs.map((tab, index) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={active === tab.id}
+            tabIndex={activeIndex === index ? 0 : -1}
+            className={
+              active === tab.id
+                ? 'dashboardPageTab active'
+                : 'dashboardPageTab'
+            }
+            onClick={() => onChange(tab.id)}
+            onKeyDown={event => onKeyDown(event, index)}
+          >
+            {tab.label}
+          </button>
+        ))}
+
+        {page === 'diagnostics' && (
+          <button
+            type="button"
+            role="tab"
+            className="dashboardPageTab"
+            tabIndex={-1}
+            aria-hidden="true"
+            hidden
+            onClick={() => onChange('fleet-command')}
+          >
+            Fleet Command
+          </button>
+        )}
+      </div>
+
+      {advancedTabs.length > 0 && (
+        <details className="dashboardPageTabsMore">
+          <summary>
+            {activeAdvanced
+              ? `Advanced: ${activeAdvanced.label}`
+              : 'Advanced views'}
+          </summary>
+          <div
+            className="dashboardPageTabsMoreMenu"
+            aria-label="Advanced diagnostic views"
+          >
+            {advancedTabs.map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                className={active === tab.id ? 'active' : ''}
+                onClick={event => {
+                  onChange(tab.id);
+                  event.currentTarget.closest('details')?.removeAttribute('open');
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

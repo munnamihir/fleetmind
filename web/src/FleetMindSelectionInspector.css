@@ -1,0 +1,209 @@
+.fmSelectionInspector {
+  position: fixed;
+  z-index: 90;
+  right: 20px;
+  bottom: 72px;
+  width: min(390px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 120px));
+  overflow-y: auto;
+  padding: 18px;
+  border: 1px solid #303740;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(16, 19, 24, .98), rgba(10, 12, 15, .98));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .48);
+  backdrop-filter: blur(18px);
+}
+
+.fmSelectionInspectorHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #22272e;
+}
+
+.fmSelectionInspectorHead > div {
+  min-width: 0;
+}
+
+.fmSelectionInspectorHead span,
+.fmSelectionSection span,
+.fmSelectionInterpretation span,
+.fmSelectionDetails span {
+  display: block;
+  color: #6f7985;
+  font-size: 8px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.fmSelectionInspectorHead h2 {
+  margin: 4px 0 3px;
+  overflow: hidden;
+  color: #eef1f4;
+  font-size: 19px;
+  font-weight: 560;
+  letter-spacing: -.03em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fmSelectionInspectorHead p {
+  margin: 0;
+  color: #848e99;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.fmSelectionInspectorHead button {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: #7f8995;
+  background: transparent;
+  cursor: pointer;
+}
+
+.fmSelectionInspectorHead button:hover,
+.fmSelectionInspectorHead button:focus-visible {
+  color: #f0f3f6;
+  background: #181c21;
+  outline: none;
+}
+
+.fmSelectionDetails {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 14px 0 4px;
+}
+
+.fmSelectionDetails > div {
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid #22282f;
+  border-radius: 7px;
+  background: #101318;
+}
+
+.fmSelectionDetails strong {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  color: #cbd1d7;
+  font-size: 10px;
+  font-weight: 540;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+}
+
+.fmSelectionSection {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 9px;
+  padding: 13px 0;
+  border-top: 1px solid #1f242a;
+  color: #97a1ac;
+}
+
+.fmSelectionSection:first-of-type {
+  margin-top: 10px;
+}
+
+.fmSelectionSection p,
+.fmSelectionInterpretation p {
+  margin: 5px 0 0;
+  color: #808a96;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.fmSelectionInterpretation {
+  margin-top: 4px;
+  padding: 11px;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  border: 1px solid #334038;
+  border-radius: 7px;
+  color: #91b69d;
+  background: rgba(24, 45, 31, .24);
+}
+
+.fmSelectionInterpretation span {
+  color: #8eaf98;
+}
+
+.fmSelectionActions {
+  margin-top: 14px;
+  display: grid;
+  gap: 7px;
+}
+
+.fmSelectionActions button {
+  min-height: 38px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #2b323a;
+  border-radius: 8px;
+  color: #aab3bd;
+  background: #111419;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.fmSelectionActions button:hover,
+.fmSelectionActions button:focus-visible {
+  color: #f4f6f8;
+  border-color: #444e5a;
+  outline: none;
+}
+
+.fmSelectionActions button.primary {
+  color: #0c0e11;
+  border-color: #dfe3e7;
+  background: #e7eaed;
+}
+
+.alertRow,
+.cohortRow,
+.failureRow,
+.fleetOpsCohortRow,
+.fleetOpsVehicleMini,
+[data-vehicle-id],
+[data-case-id],
+[data-recommendation-id] {
+  cursor: pointer;
+}
+
+.alertRow:focus-within,
+.cohortRow:focus-within,
+.failureRow:focus-within,
+.fleetOpsCohortRow:focus-within,
+.fleetOpsVehicleMini:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, .22);
+  outline-offset: 2px;
+}
+
+.dashboardPageTabs-diagnostics {
+  position: relative;
+  overflow: visible;
+}
+
+@media (max-width: 760px) {
+  .fmSelectionInspector {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    width: auto;
+    max-height: 72vh;
+  }
+}
