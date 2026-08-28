@@ -1,0 +1,30 @@
+{{- if .Values.mlTrainer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ml-trainer
+  labels:
+    {{- include "fleetmind.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ml-trainer
+spec:
+  replicas: {{ .Values.mlTrainer.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: ml-trainer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: ml-trainer
+    spec:
+      containers:
+        - name: ml-trainer
+          image: {{ .Values.mlTrainer.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            {{- include "fleetmind.databaseEnv" . | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-fleetmind
+{{- end }}

@@ -80,6 +80,7 @@ export const PAGE_TABS: Record<DashboardPage, DashboardTab[]> = {
     { id: 'vehicle-twin', label: 'Vehicle Twin' },
     { id: 'planning', label: 'Planning' },
     { id: 'fleet-command', label: 'Fleet Command' },
+    { id: 'platform', label: 'Platform' },
     { id: 'transitions', label: 'Transitions' },
     { id: 'episodes', label: 'Episodes' },
     { id: 'events', label: 'Events' },

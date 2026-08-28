@@ -22,6 +22,7 @@ import { FleetDecisionIntelligence } from './FleetDecisionIntelligence';
 import { VehicleOperationalTwin } from './VehicleOperationalTwin';
 import { FleetIntelligencePlanning } from './FleetIntelligencePlanning';
 import { FleetCommandOperations } from './FleetCommandOperations';
+import { PlatformCompletionConsole } from './PlatformCompletionConsole';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
@@ -689,6 +690,12 @@ export function RootCauseDashboard({
         <FleetCommandOperations
           selectedVehicleId={selectedVehicleId}
           onSelectVehicle={setSelectedVehicleId}
+          runId={status?.runId}
+        />
+      )}
+
+      {activeView === 'platform' && (
+        <PlatformCompletionConsole
           runId={status?.runId}
         />
       )}

@@ -1,0 +1,158 @@
+services:
+  api:
+    environment:
+      FLEETMIND_ENV: ${FLEETMIND_ENV:-development}
+      FLEETMIND_ARCHIVE_MANIFEST: /archive/manifest.json
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-fleetmind-api}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      MODEL_REGISTRY_URL: ${MODEL_REGISTRY_URL:-}
+      MODEL_REGISTRY_TOKEN: ${MODEL_REGISTRY_TOKEN:-}
+    volumes:
+      - fleetmind-archive:/archive:ro
+
+  asset-topic-init:
+    image: redpandadata/redpanda:v24.3.1
+    profiles: ["platform"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -e
+        rpk topic create "$${ASSET_TELEMETRY_TOPIC}" \
+          --partitions "$${ASSET_TOPIC_PARTITIONS}" \
+          --replicas 1 \
+          --brokers redpanda:9092 \
+          2>/dev/null || true
+        rpk topic describe "$${ASSET_TELEMETRY_TOPIC}" \
+          --brokers redpanda:9092 >/dev/null
+        echo "FleetMind asset telemetry topic ready."
+    environment:
+      ASSET_TELEMETRY_TOPIC: ${ASSET_TELEMETRY_TOPIC:-asset.telemetry.v1}
+      ASSET_TOPIC_PARTITIONS: ${ASSET_TOPIC_PARTITIONS:-6}
+    restart: "no"
+
+  asset-worker:
+    profiles: ["platform"]
+    build:
+      context: .
+      dockerfile: services/asset_worker/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fleetmind:fleetmind@postgres:5432/fleetmind}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      ASSET_TELEMETRY_TOPIC: ${ASSET_TELEMETRY_TOPIC:-asset.telemetry.v1}
+      ASSET_WORKER_BATCH_SIZE: ${ASSET_WORKER_BATCH_SIZE:-500}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      asset-topic-init:
+        condition: service_completed_successfully
+
+  asset-simulator:
+    profiles: ["platform"]
+    build:
+      context: .
+      dockerfile: services/asset_simulator/Dockerfile
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      ASSET_TELEMETRY_TOPIC: ${ASSET_TELEMETRY_TOPIC:-asset.telemetry.v1}
+      ASSET_SIMULATED_ASSETS: ${ASSET_SIMULATED_ASSETS:-90}
+      ASSET_SIM_EVENTS_PER_SECOND: ${ASSET_SIM_EVENTS_PER_SECOND:-30}
+      ASSET_SIM_SEED: ${ASSET_SIM_SEED:-20260827}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      asset-topic-init:
+        condition: service_completed_successfully
+
+  archive:
+    profiles: ["platform"]
+    build:
+      context: .
+      dockerfile: services/archive/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fleetmind:fleetmind@postgres:5432/fleetmind}
+      FLEETMIND_ARCHIVE_DIR: /archive
+      FLEETMIND_ARCHIVE_MANIFEST: /archive/manifest.json
+      ARCHIVE_BATCH_SIZE: ${ARCHIVE_BATCH_SIZE:-5000}
+      ARCHIVE_POLL_SECONDS: ${ARCHIVE_POLL_SECONDS:-30}
+      ARCHIVE_RETENTION_DAYS: ${ARCHIVE_RETENTION_DAYS:-30}
+      ICEBERG_CATALOG_URI: ${ICEBERG_CATALOG_URI:-}
+      ICEBERG_WAREHOUSE: ${ICEBERG_WAREHOUSE:-}
+      ICEBERG_NAMESPACE: ${ICEBERG_NAMESPACE:-fleetmind}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - fleetmind-archive:/archive
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  load-generator:
+    profiles: ["loadtest"]
+    build:
+      context: .
+      dockerfile: services/simulator/Dockerfile
+    volumes:
+      - ./tools:/tools:ro
+    command:
+      - python
+      - /tools/kafka_load_generator.py
+      - --brokers
+      - redpanda:9092
+      - --topic
+      - ${LOAD_TOPIC:-vehicle.telemetry.v1}
+      - --mode
+      - ${LOAD_MODE:-vehicle}
+      - --rate
+      - ${LOAD_RATE:-100000}
+      - --duration
+      - ${LOAD_DURATION_SECONDS:-30}
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+
+  prometheus:
+    profiles: ["platform"]
+    image: prom/prometheus:v3.1.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - fleetmind-prometheus:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+      - redpanda
+
+  grafana:
+    profiles: ["platform"]
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-fleetmind}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - fleetmind-grafana:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  fleetmind-archive:
+  fleetmind-prometheus:
+  fleetmind-grafana:

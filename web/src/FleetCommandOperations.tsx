@@ -23,6 +23,8 @@ import {
   Workflow,
 } from 'lucide-react';
 
+import { ClosedLoopOutcomesPanel } from './ClosedLoopOutcomesPanel';
+
 import './FleetCommandOperations.css';
 
 
@@ -59,6 +61,7 @@ type ClosedLoopView =
   | 'EVALUATE'
   | 'RESULTS'
   | 'RECOMMENDATIONS'
+  | 'OUTCOMES'
   | 'LIFECYCLE';
 
 
@@ -2419,6 +2422,7 @@ export function FleetCommandOperations({
               ['EVALUATE', 'Evaluate'],
               ['RESULTS', 'Evaluation Results'],
               ['RECOMMENDATIONS', 'Recommendations'],
+              ['OUTCOMES', 'Outcomes'],
               ['LIFECYCLE', 'Lifecycle'],
             ]}
           />
@@ -2723,6 +2727,16 @@ export function FleetCommandOperations({
                   </div>
                 )}
               </article>
+            </div>
+          )}
+
+          {closedLoopView ===
+            'OUTCOMES' && (
+            <div className="fleetOpsSubTabPanel">
+              <ClosedLoopOutcomesPanel
+                runId={runId}
+                selectedVehicleId={selectedVehicleId}
+              />
             </div>
           )}
 

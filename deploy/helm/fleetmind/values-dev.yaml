@@ -1,0 +1,21 @@
+global:
+  environment: development
+
+api:
+  replicas: 1
+  autoscaling:
+    enabled: false
+
+worker:
+  replicas: 1
+  autoscaling:
+    enabled: false
+
+web:
+  replicas: 1
+
+assetWorker:
+  enabled: false
+
+archive:
+  enabled: false

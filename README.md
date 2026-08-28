@@ -10,7 +10,7 @@ The project deliberately separates **observable evidence**, **private synthetic 
 
 ## Current status
 
-**Current milestone: Phase 8.1 complete — Fleet Command, decision-queue ownership, closed-loop recommendation materialization, and dashboard navigation/polling hardening.**
+**Current implementation milestone: roadmap delivery through Phase 9.5. Closed-loop outcome learning, policy replay/shadow experimentation, observability, scale/recovery harnesses, deployment engineering, model ops, and multi-asset reliability are implemented. Environment-dependent throughput, production SLO, and disaster-recovery results remain validation tasks rather than preclaimed results.**
 
 The current end-to-end stack is:
 
@@ -66,6 +66,32 @@ React Engineering Console
 - Lazy mounting of heavy Root Cause modules
 - Active-workspace polling inside Fleet Command
 - QueuePool exhaustion fixed at the source instead of increasing database pool limits
+
+## Roadmap completion delivery
+
+FleetMind now includes the remaining roadmap implementation surfaces:
+
+- **Phase 8.2:** deterministic, idempotent post-execution outcome observation
+- **Phase 8.3:** descriptive closed-loop effectiveness analytics with evidence gates
+- **Phase 8.4:** versioned recommendation policies replayed against frozen fleet evidence
+- **Phase 8.5:** no-write control/candidate shadow experiments with explicit operator promotion/rollback metadata
+- **Phase 9.1:** Prometheus metrics, optional OpenTelemetry and Grafana provisioning
+- **Phase 9.2:** target-rate load generation, backpressure/replay, broker-restart testing, Parquet archive and optional Iceberg append
+- **Phase 9.3:** Helm deployment, environment overlays, explicit migration jobs, HPA/PDB and local backup/restore testing
+- **Phase 9.4:** internal/external model registry integration, promotion gates, feature-schema compatibility, drift monitoring and reproducible offline evaluation
+- **Phase 9.5:** shared reliability plugins plus robot, charger and energy-system telemetry simulation/ingestion
+
+The codebase intentionally does **not** turn an implementation target into an empirical claim. For example, the 100K-events/sec harness reports the measured result from the environment where it is executed; production SLO and RPO/RTO claims require measured operational history.
+
+Run the optional Phase 9 platform profile with:
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.platform.yml \
+  --profile platform \
+  up --build
+```
 
 ## What makes the demo different
 

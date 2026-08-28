@@ -1,0 +1,30 @@
+{{- if .Values.assetWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-asset-worker
+  labels:
+    {{- include "fleetmind.labels" . | nindent 4 }}
+    app.kubernetes.io/component: asset-worker
+spec:
+  replicas: {{ .Values.assetWorker.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: asset-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: asset-worker
+    spec:
+      containers:
+        - name: asset-worker
+          image: {{ .Values.assetWorker.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            {{- include "fleetmind.databaseEnv" . | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-fleetmind
+{{- end }}

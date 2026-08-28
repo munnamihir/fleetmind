@@ -267,172 +267,174 @@ The original Root Cause and Incident Replay milestones have been implemented as 
 
 ---
 
-# Future ahead
+# Roadmap implementation delivery
 
-## Phase 8.2 — Closed-Loop Outcome Verification 🚧 NEXT
+The remaining roadmap has now been delivered as one cohesive implementation
+pass. The checkboxes below distinguish **implemented capability** from
+**environment-dependent proof**. FleetMind never marks a throughput, SLO,
+disaster-recovery or causal-maintenance claim complete merely because code for
+measuring it exists.
 
-Goal: answer **“what observable evidence changed after an executed workflow recommendation?”**
+## Phase 8.2 — Closed-Loop Outcome Verification ✅ implementation
 
-Planned:
+- [x] Persisted recommendation outcome records
+- [x] Baseline evidence snapshot
+- [x] Post-execution evidence snapshot
+- [x] Deterministic observed-outcome evaluator
+- [x] `PENDING_OBSERVATION`
+- [x] `INSUFFICIENT_DATA`
+- [x] `IMPROVED`
+- [x] `STABLE`
+- [x] `WORSENED`
+- [x] `NO_MATERIAL_CHANGE`
+- [x] Versioned, idempotent evaluation identity
+- [x] Database uniqueness
+- [x] Concurrent insert winner reload
+- [x] Preview vs explicit materialization
+- [x] Summary/list/detail APIs
+- [x] Fleet Command Outcomes view
+- [x] Latest same-lineage diagnostic evidence for post-execution comparison
+- [x] Explicit non-causality truth boundary
 
-- [ ] Persisted recommendation outcome record
-- [ ] Baseline snapshot at/around workflow execution
-- [ ] Post-execution observation snapshot
-- [ ] Deterministic pre/post delta evaluator
-- [ ] Outcome states such as:
-  - `PENDING_OBSERVATION`
-  - `INSUFFICIENT_DATA`
-  - `IMPROVED`
-  - `STABLE`
-  - `WORSENED`
-  - `NO_MATERIAL_CHANGE`
-- [ ] Evaluation-version field
-- [ ] Idempotent outcome materialization
-- [ ] Database uniqueness for outcome evaluation keys
-- [ ] Preview vs materialize API
-- [ ] Outcome summary API
-- [ ] Outcome detail API
-- [ ] Fleet Command **Outcomes** tab
-- [ ] Before/after evidence comparison UI
-- [ ] Contract/math/concurrency tests
-- [ ] Explicit claim boundary: observed change does not prove repair causality
+## Phase 8.3 — Closed-Loop Effectiveness Analytics ✅ implementation
 
-## Phase 8.3 — Closed-Loop Effectiveness Analytics ⏳
+- [x] Outcome distribution by recommendation type
+- [x] Cohort outcome views
+- [x] Materialized → assigned → acknowledged → approved → executed funnel
+- [x] Assignment / approval / execution latency
+- [x] Execution-to-observation latency
+- [x] Repeated recommendation detection
+- [x] Coverage-gap closure summary
+- [x] Minimum evidence gates for grouped outcome distributions
+- [x] Descriptive analytics only; no causal maintenance success rate
 
-Goal: aggregate observed workflow outcomes without overstating physical effect.
+## Phase 8.4 — Recommendation Policy Evaluation ✅ implementation
 
-Planned:
+- [x] Versioned policy entities
+- [x] Immutable policy key/version identity
+- [x] Frozen fleet decision snapshots as preferred replay evidence
+- [x] Explicit partial/non-frozen fallback that blocks promotion
+- [x] Candidate volume / selectivity
+- [x] Duplicate suppression
+- [x] Conflict detection
+- [x] Cohort coverage
+- [x] Explainable policy filters
+- [x] Promotion criteria
+- [x] Explicit operator promotion / disable / rollback metadata
+- [x] Promotion remains control-plane metadata until separately adopted by production recommendation generation
 
-- [ ] Outcome distributions by recommendation type
-- [ ] Outcome distributions by fleet cohort
-- [ ] Time-to-observation metrics
-- [ ] Recommendation-to-workflow completion funnel
-- [ ] Assignment / approval latency
-- [ ] Repeated recommendation analysis
-- [ ] Coverage-gap closure analysis
-- [ ] Operator/workflow effectiveness metrics
-- [ ] Comparison windows with minimum-evidence gates
-- [ ] No causal “maintenance success rate” claim without a valid design
+## Phase 8.5 — Shadow-Mode Policy Experimentation ✅ implementation
 
-## Phase 8.4 — Recommendation Policy Evaluation ⏳
-
-Goal: measure recommendation policy quality before changing production behavior.
-
-Planned:
-
-- [ ] Versioned recommendation policies
-- [ ] Policy replay against historical run-frozen evidence
-- [ ] Candidate volume / selectivity metrics
-- [ ] Conflict detection
-- [ ] Duplicate recommendation suppression
-- [ ] Policy cohort coverage
-- [ ] Policy explainability
-- [ ] Promotion criteria
-
-## Phase 8.5 — Shadow-Mode Policy Experimentation ⏳
-
-Goal: compare candidate policies without exposing operators to uncontrolled automatic actions.
-
-Planned:
-
-- [ ] Shadow policy execution
-- [ ] Control vs candidate policy comparison
-- [ ] No-write recommendation generation
-- [ ] Versioned experiment identity
-- [ ] Frozen evaluation inputs
-- [ ] Outcome comparison when eligible evidence exists
-- [ ] Operator review before promotion
-- [ ] Rollback / disable controls
+- [x] Control vs candidate policy replay
+- [x] No-write recommendation generation
+- [x] Same frozen input for both policies
+- [x] Versioned deterministic experiment identity
+- [x] Overlap / control-only / candidate-only comparison
+- [x] Candidate-volume delta
+- [x] Conflict comparison
+- [x] Observed-outcome context by recommendation type
+- [x] Persistent frozen experiment input/result record
+- [x] No automatic promotion or execution
 
 ---
 
-# Phase 9.0 — Fleet Reliability Intelligence Platform ⏳
+# Phase 9 — Fleet Reliability Intelligence Platform
 
-Phase 9 shifts FleetMind from a feature-rich local engineering demo toward a scalable reliability platform.
+## Phase 9.1 — Platform Observability ✅ implementation
 
-## 9.1 Platform observability
+- [x] Prometheus API request metrics
+- [x] Request latency histogram
+- [x] 5xx error counter
+- [x] Active-request gauge
+- [x] SQLAlchemy pool checked-out / size / overflow gauges
+- [x] Redpanda Prometheus scrape configuration
+- [x] Grafana provisioning and FleetMind Platform dashboard
+- [x] Optional OpenTelemetry FastAPI instrumentation
+- [x] Explicit SLO target definitions
+- [ ] Production SLO achievement over the declared measurement windows — **requires environment evidence**
 
-- [ ] OpenTelemetry instrumentation
-- [ ] Prometheus metrics
-- [ ] Grafana dashboards
-- [ ] API latency/error metrics
-- [ ] Database pool utilization metrics
-- [ ] Polling/request fan-out monitoring
-- [ ] SLO definitions
+## Phase 9.2 — Stream & Storage Scale ✅ implementation / validation harness
 
-## 9.2 Stream and storage scale
+- [x] Configurable Kafka target-rate load generator
+- [x] 100K-events/sec target mode
+- [x] Delivered-rate measurement instead of hard-coded success claim
+- [x] Backpressure / stopped-consumer backlog test
+- [x] Consumer replay / lag convergence test
+- [x] Broker restart smoke test
+- [x] Partition-aware multi-asset topic
+- [x] Stream-processor adoption decision record
+- [x] Incremental Parquet archival
+- [x] Zstandard compression
+- [x] Experiment/date partitioning
+- [x] Watermark manifest
+- [x] Configurable retention
+- [x] Optional Iceberg append adapter
+- [ ] Sustained end-to-end 100K+ events/sec verified on a named environment — **run the harness**
+- [ ] Production broker-failure/backpressure envelope characterized — **run deployment-specific tests**
 
-- [ ] Load generator to 100K+ events/sec
-- [ ] Backpressure tests
-- [ ] Broker failure / replay tests
-- [ ] Stream processor evaluation (Flink/Spark only where justified)
-- [ ] Parquet/Iceberg historical data layer
-- [ ] Retention / compaction strategy
+## Phase 9.3 — Deployment Engineering ✅ implementation / validation harness
 
-## 9.3 Deployment engineering
+- [x] Helm chart
+- [x] Development / staging / production values
+- [x] Secret-aware database configuration
+- [x] Pre-install / pre-upgrade migration Job
+- [x] `FLEETMIND_AUTO_MIGRATE=false` deployment discipline
+- [x] API readiness/liveness probes
+- [x] API HPA
+- [x] Worker HPA
+- [x] API/worker PodDisruptionBudgets
+- [x] Optional archive and multi-asset deployments
+- [x] Local PostgreSQL backup/restore smoke test
+- [ ] Production RPO/RTO verified — **requires deployment-specific recovery exercise**
+- [ ] Production multi-zone broker/database architecture selected — **environment decision**
 
-- [ ] Kubernetes manifests
-- [ ] Helm packaging
-- [ ] Environment-separated configuration
-- [ ] Secrets strategy
-- [ ] Migration discipline
-- [ ] Horizontal API/worker scaling
-- [ ] Disaster/recovery tests
+## Phase 9.4 — Model Operations ✅ implementation
 
-## 9.4 Model operations
+- [x] Versioned model registry
+- [x] Candidate / staging / production / archived stages
+- [x] Artifact SHA-256 identity
+- [x] Feature-schema compatibility gate
+- [x] Locked benchmark snapshot identity gate
+- [x] Explicit human promotion
+- [x] Previous production version archival
+- [x] Feature-distribution baseline
+- [x] Current-vs-baseline drift report
+- [x] Reproducible offline diagnostic evaluation script
+- [x] Benchmark artifact SHA verification tool
+- [x] Generic external registry HTTP integration via `MODEL_REGISTRY_URL`
+- [ ] A specific external provider integration certified — **configure and validate the selected provider**
 
-- [ ] External model registry
-- [ ] Model promotion workflow
-- [ ] Feature/schema compatibility gates
-- [ ] Drift monitoring
-- [ ] Benchmark lineage governance
-- [ ] Reproducible offline evaluation jobs
+## Phase 9.5 — Physical AI / Multi-Asset Expansion ✅ reliability layer
 
-## 9.5 Physical AI / multi-asset expansion
-
-- [ ] Robot telemetry schema
-- [ ] Actuator current / temperature / torque simulator
-- [ ] Gearbox/vibration degradation scenario
-- [ ] Charger/energy-system reliability schema
-- [ ] Shared reliability primitives across EV and robot assets
-- [ ] Asset-specific diagnostic plugins
+- [x] Shared plugin-based reliability primitives
+- [x] Robot telemetry contract
+- [x] Actuator current / temperature / torque
+- [x] Gearbox vibration / temperature
+- [x] Robot latent degradation simulator
+- [x] Charger telemetry contract and simulator
+- [x] Energy-system telemetry contract and simulator
+- [x] Kafka multi-asset ingestion worker
+- [x] Idempotent asset event persistence
+- [x] Asset summary/detail APIs
+- [x] Multi-asset Platform console
+- [x] Explicit boundary: operational attention, not calibrated physical failure probability
+- [x] Explicit boundary: no autonomous physical control or safety decision
 
 ---
 
-## Long-term design rule
+# Completion definition
 
-FleetMind should evolve from:
+The FleetMind roadmap is now implemented through Phase 9.5 at the code,
+interface, test-harness and deployment-tooling level.
 
-```text
-telemetry → detection → diagnosis
-```
+The following remain intentionally evidence-dependent rather than marked as
+completed facts:
 
-into:
+1. sustained throughput on a named hardware/deployment environment;
+2. production SLO attainment over the defined time windows;
+3. production RPO/RTO;
+4. external provider-specific model-registry certification;
+5. any claim that a workflow caused a physical repair, prevented a failure, or
+   improved physical safety.
 
-```text
-telemetry
-   ↓
-detection
-   ↓
-evidence
-   ↓
-diagnosis
-   ↓
-fleet decision
-   ↓
-human-approved workflow
-   ↓
-observed outcome
-   ↓
-policy learning
-```
-
-without silently crossing these boundaries:
-
-```text
-correlation ≠ causality
-attention ≠ physical risk probability
-model-confidence horizon ≠ physical RUL
-workflow execution ≠ physical repair
-observed improvement ≠ proof that maintenance caused improvement
-```
+Those are validation programs, not missing software phases.

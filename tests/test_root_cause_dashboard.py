@@ -41,7 +41,14 @@ class RootCauseDashboardContractTests(unittest.TestCase):
         self.assertIn("RootCauseDashboard", source)
         self.assertIn("'diagnostics'", source)
         self.assertIn("setPage('diagnostics')", source)
-        self.assertIn("<RootCauseDashboard />", source)
+        self.assertIn(
+            "<RootCauseDashboard",
+            source,
+        )
+        self.assertIn(
+            "activeView={dashboardViewByPage.diagnostics}",
+            source,
+        )
 
 if __name__ == "__main__":
     unittest.main()

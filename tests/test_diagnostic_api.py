@@ -18,9 +18,30 @@ class DiagnosticAPIContractTests(unittest.TestCase):
         self.assertIn('@router.get("/vehicles/{vehicle_id}")', source)
         self.assertIn('@router.get("/incidents")', source)
 
-        self.assertNotIn("@router.post(", source)
-        self.assertNotIn("@router.put(", source)
-        self.assertNotIn("@router.delete(", source)
+        # The modern diagnostics router intentionally contains
+        # human-gated workflow mutation routes from later phases.
+        # The original core diagnostic evidence endpoints themselves
+        # must remain read-only.
+        read_only_routes = (
+            "/status",
+            "/benchmark",
+            "/vehicles/{vehicle_id}",
+            "/incidents",
+        )
+
+        for route in read_only_routes:
+            self.assertNotIn(
+                f'@router.post("{route}")',
+                source,
+            )
+            self.assertNotIn(
+                f'@router.put("{route}")',
+                source,
+            )
+            self.assertNotIn(
+                f'@router.delete("{route}")',
+                source,
+            )
 
     def test_vehicle_api_does_not_expose_private_failure_truth(self):
         source = (

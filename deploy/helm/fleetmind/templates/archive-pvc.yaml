@@ -1,0 +1,13 @@
+{{- if and .Values.archive.enabled .Values.archive.persistentVolume.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-archive
+  labels:
+    {{- include "fleetmind.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.archive.persistentVolume.size }}
+{{- end }}

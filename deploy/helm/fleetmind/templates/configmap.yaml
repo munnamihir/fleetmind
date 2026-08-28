@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-fleetmind
+  labels:
+    {{- include "fleetmind.labels" . | nindent 4 }}
+data:
+  FLEETMIND_ENV: {{ .Values.global.environment | quote }}
+  KAFKA_BOOTSTRAP_SERVERS: {{ .Values.kafka.bootstrapServers | quote }}
+  TELEMETRY_TOPIC: {{ .Values.kafka.telemetryTopic | quote }}
+  FAILURE_TOPIC: {{ .Values.kafka.failureTopic | quote }}
+  ASSET_TELEMETRY_TOPIC: {{ .Values.kafka.assetTelemetryTopic | quote }}
+  FLEETMIND_AUTO_MIGRATE: "false"
+  OTEL_ENABLED: {{ .Values.observability.otelEnabled | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.observability.otlpEndpoint | quote }}
