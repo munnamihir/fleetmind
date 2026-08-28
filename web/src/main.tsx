@@ -8,6 +8,7 @@ import { FleetMindNavigationRail } from './FleetMindNavigationRail';
 import { FleetMindSelectionInspector } from './FleetMindSelectionInspector';
 import { FleetMindWorkInbox } from './FleetMindWorkInbox';
 import './styles.css';
+import './FleetMindExperienceV2Responsive.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
