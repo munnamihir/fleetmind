@@ -1,0 +1,17 @@
+global:
+  environment: staging
+
+api:
+  replicas: 2
+
+worker:
+  replicas: 2
+
+web:
+  replicas: 2
+
+assetWorker:
+  enabled: true
+
+archive:
+  enabled: true

@@ -1,0 +1,89 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "API request rate",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(fleetmind_http_requests_total[5m]))",
+          "legendFormat": "req/s"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "5xx rate",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(fleetmind_http_server_errors_total[5m]))",
+          "legendFormat": "5xx/s"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "API p95 latency",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(fleetmind_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "seconds"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Active API requests",
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 0},
+      "targets": [
+        {
+          "expr": "fleetmind_http_active_requests",
+          "legendFormat": "active"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "SQLAlchemy pool",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "targets": [
+        {
+          "expr": "fleetmind_db_pool_checked_out",
+          "legendFormat": "checked out"
+        },
+        {
+          "expr": "fleetmind_db_pool_size",
+          "legendFormat": "base pool"
+        },
+        {
+          "expr": "fleetmind_db_pool_overflow",
+          "legendFormat": "overflow"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests by endpoint",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "targets": [
+        {
+          "expr": "sum by (path) (rate(fleetmind_http_requests_total[5m]))",
+          "legendFormat": "{{path}}"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 40,
+  "tags": ["fleetmind", "phase-9"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "FleetMind Platform",
+  "uid": "fleetmind-platform",
+  "version": 1
+}

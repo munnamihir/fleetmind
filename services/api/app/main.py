@@ -7,6 +7,9 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from app.diagnostics import router as diagnostics_router
+from app.completion import router as completion_router
+from app.platform import router as platform_router
+from app.observability import configure_observability
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
@@ -20,9 +23,12 @@ from fleetmind_common.reliability import (
     median_or_none,
 )
 
-app = FastAPI(title="FleetMind API", version="0.6.0")
+app = FastAPI(title="FleetMind API", version="0.9.0")
 
 app.include_router(diagnostics_router)
+app.include_router(completion_router)
+app.include_router(platform_router)
+configure_observability(app)
 
 @app.get("/health", tags=["system"])
 def health():
@@ -43,8 +49,14 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup() -> None:
-    Base.metadata.create_all(bind=engine)
-    ensure_schema_compatibility()
+    auto_migrate = os.getenv(
+        "FLEETMIND_AUTO_MIGRATE",
+        "true",
+    ).lower() in ("1", "true", "yes", "on")
+
+    if auto_migrate:
+        Base.metadata.create_all(bind=engine)
+        ensure_schema_compatibility()
 
 
 def db_session():
@@ -150,7 +162,7 @@ def warning_metrics(db: Session, failure: FailureEvent) -> dict:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "fleetmind-api", "version": "0.4.0"}
+    return {"status": "ok", "service": "fleetmind-api", "version": app.version}
 
 
 @app.get("/api/v1/fleet/summary")

@@ -1,0 +1,94 @@
+global:
+  environment: development
+  imagePullPolicy: IfNotPresent
+
+database:
+  existingSecret: ""
+  urlKey: DATABASE_URL
+  url: postgresql+psycopg://fleetmind:fleetmind@postgres:5432/fleetmind
+
+kafka:
+  bootstrapServers: redpanda:9092
+  telemetryTopic: vehicle.telemetry.v1
+  failureTopic: vehicle.failure-events.v1
+  assetTelemetryTopic: asset.telemetry.v1
+
+api:
+  image: fleetmind-api:latest
+  replicas: 2
+  port: 8000
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    cpuUtilization: 70
+
+worker:
+  image: fleetmind-worker:latest
+  replicas: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 12
+    cpuUtilization: 70
+
+web:
+  image: fleetmind-web:latest
+  replicas: 2
+  port: 5173
+  service:
+    type: ClusterIP
+  apiUrl: http://fleetmind-api:8000
+
+mlTrainer:
+  enabled: true
+  image: fleetmind-ml:latest
+  replicas: 1
+
+assetWorker:
+  enabled: true
+  image: fleetmind-asset-worker:latest
+  replicas: 1
+
+assetSimulator:
+  enabled: false
+  image: fleetmind-asset-simulator:latest
+  replicas: 1
+  assetCount: 90
+  eventsPerSecond: 30
+
+archive:
+  enabled: false
+  image: fleetmind-archive:latest
+  replicas: 1
+  retentionDays: 30
+  persistentVolume:
+    enabled: true
+    size: 20Gi
+
+observability:
+  otelEnabled: false
+  otlpEndpoint: ""
+
+migration:
+  enabled: true
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

@@ -56,12 +56,22 @@ class PrognosticMaintenanceContractTests(unittest.TestCase):
             "class DiagnosticMaintenancePlanUpdate",
             1,
         )[1].split(
-            '@router.get("/summary")',
+            "class DiagnosticAutomationActorRequest",
             1,
         )[0]
-        self.assertIn("DiagnosticReplayPoint", section)
-        self.assertNotIn("FailureEvent", section)
-        self.assertNotIn("Telemetry.", section)
+
+        self.assertIn(
+            "DiagnosticReplayPoint",
+            section,
+        )
+        self.assertNotIn(
+            "FailureEvent",
+            section,
+        )
+        self.assertNotIn(
+            "Telemetry.",
+            section,
+        )
 
     def test_operational_trajectory_is_case_window_scoped(self):
         source = (ROOT / "services/api/app/diagnostics.py").read_text()

@@ -1,0 +1,42 @@
+{{- if .Values.archive.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-archive
+  labels:
+    {{- include "fleetmind.labels" . | nindent 4 }}
+    app.kubernetes.io/component: archive
+spec:
+  replicas: {{ .Values.archive.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: archive
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: archive
+    spec:
+      containers:
+        - name: archive
+          image: {{ .Values.archive.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            {{- include "fleetmind.databaseEnv" . | nindent 12 }}
+            - name: FLEETMIND_ARCHIVE_DIR
+              value: /archive
+            - name: ARCHIVE_RETENTION_DAYS
+              value: {{ .Values.archive.retentionDays | quote }}
+          volumeMounts:
+            - name: archive
+              mountPath: /archive
+      volumes:
+        - name: archive
+          {{- if .Values.archive.persistentVolume.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-archive
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

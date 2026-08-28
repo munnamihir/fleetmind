@@ -20,7 +20,7 @@ The current implementation includes:
 - human-controlled lifecycle transitions
 - dashboard nested navigation with active polling
 
-Phase 8.1 is complete. Phase 8.2 will add post-execution outcome observation.
+The roadmap implementation is now delivered through Phase 9.5. Closed-loop outcome observation, effectiveness analytics, policy replay/shadow experimentation, platform observability, scale/recovery harnesses, deployment engineering, model ops and multi-asset reliability are integrated. Empirical throughput, production SLO and RPO/RTO claims remain environment-dependent.
 
 ---
 
@@ -745,3 +745,95 @@ FleetMind intelligence
 ```
 
 The long-term architecture should support EVs, robots, chargers, and energy systems without weakening the evidence and human-control boundaries established in the current system.
+
+---
+
+## Completion architecture: Phases 8.2–9.5
+
+```text
+EXECUTED HUMAN-CONTROLLED WORKFLOW
+              |
+              v
+      Outcome Observation 8.2
+      before / after evidence
+              |
+              v
+   Effectiveness Analytics 8.3
+   descriptive + evidence gates
+              |
+              +-------------------------+
+              |                         |
+              v                         v
+    Policy Replay 8.4           Shadow Experiments 8.5
+    frozen evidence             control vs candidate
+    no recommendation writes    no production writes
+              |                         |
+              +------------+------------+
+                           |
+                           v
+                    Human governance
+                           |
+                           v
+                  FleetMind Platform 9.x
+           +---------------+----------------+
+           |               |                |
+           v               v                v
+     Observability     Model Ops       Multi-Asset
+     Prom/OTel         registry        robot/charger/
+     SLO targets       drift/gates     energy telemetry
+           |
+           v
+     Deployment / Scale
+     Helm + HPA/PDB
+     load/backpressure/DR harnesses
+     Parquet + optional Iceberg
+```
+
+### Post-execution evidence boundary
+
+An outcome record joins an executed recommendation to observable baseline and
+post-execution evidence. The evaluator may classify a change as `IMPROVED`,
+`STABLE`, `WORSENED`, `NO_MATERIAL_CHANGE`, `PENDING_OBSERVATION`, or
+`INSUFFICIENT_DATA`.
+
+The classification is explicitly **not** proof that maintenance caused the
+change or that a physical repair occurred.
+
+### Policy governance boundary
+
+Policy replay consumes a frozen fleet-decision snapshot when available.
+Candidate policies can filter recommendation type, workflow priority, source
+families and per-vehicle volume. Replay is no-write. A policy marked promoted
+is governance metadata; the existing production recommendation generator is
+not silently replaced.
+
+Shadow experiments persist the exact replay input and both policy results so a
+future review can reproduce the comparison.
+
+### Platform observability boundary
+
+The API exposes Prometheus metrics and optional OpenTelemetry traces. Grafana
+is an optional Compose-profile service. SLO values are declared targets; no
+production SLO is claimed until measured in the target environment.
+
+### Storage and stream-scale boundary
+
+PostgreSQL remains online state. The archive service incrementally emits
+partitioned Parquet and can append to pre-created Iceberg tables when an
+external catalog is configured. Kafka remains the interchange boundary for a
+future Flink/Spark adoption if measured stateful-streaming requirements justify
+one.
+
+### Deployment boundary
+
+Kubernetes deployments disable implicit application migration and use a Helm
+pre-install/pre-upgrade migration Job. API and worker HPAs are available, but
+horizontal scaling must be reconciled with Kafka partitions and database
+capacity.
+
+### Multi-asset boundary
+
+Robot, charger and energy-system plugins share transparent reliability
+attention primitives. Their telemetry remains observable and asset-specific.
+The plugin layer does not issue actuator commands, autonomous maintenance, or
+safety decisions.

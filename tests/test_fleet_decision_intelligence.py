@@ -73,17 +73,36 @@ class FleetDecisionIntelligenceContractTests(unittest.TestCase):
 
     def test_fleet_section_is_truth_blind_and_telemetry_blind(self):
         source = (ROOT / "services/api/app/diagnostics.py").read_text()
-        section = source.split(
+        phase_section = source.split(
             "# Phase 7.0 — Fleet State & Decision Intelligence",
             1,
+        )[1]
+
+        resolver = phase_section.split(
+            "def _current_fleet_decision_records(",
+            1,
         )[1].split(
-            '@router.get("/summary")',
+            "def _fleet_decision_snapshot_payload(",
             1,
         )[0]
-        self.assertNotIn("FailureEvent", section)
-        self.assertNotIn("Telemetry.", section)
-        self.assertIn('"usesTelemetry": False', section)
-        self.assertIn('"usesPrivateFailureTruth": False', section)
+
+        self.assertNotIn(
+            "FailureEvent",
+            resolver,
+        )
+        self.assertNotIn(
+            "Telemetry.",
+            resolver,
+        )
+
+        self.assertIn(
+            '"usesTelemetry": False',
+            phase_section,
+        )
+        self.assertIn(
+            '"usesPrivateFailureTruth": False',
+            phase_section,
+        )
 
     def test_fleet_section_uses_current_predictions_and_prognostics(self):
         source = (ROOT / "services/api/app/diagnostics.py").read_text()
