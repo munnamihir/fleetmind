@@ -14,7 +14,13 @@ import {
   WifiOff,
   Wrench,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 import './FleetMindExperienceV2.css';
 
@@ -32,7 +38,7 @@ type MobileDestination = {
   label: string;
   pageLabel: string;
   viewLabel: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 };
 
 const PAGE_NAMES: Record<string, string> = {
