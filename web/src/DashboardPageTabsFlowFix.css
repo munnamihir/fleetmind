@@ -1,0 +1,8 @@
+/* Keep the shared workspace navigation in normal document flow.
+   Experience V2 previously made this bar sticky; on long diagnostic screens
+   that caused page headings to scroll underneath the navigation surface. */
+.dashboardPageTabs {
+  position: relative !important;
+  top: auto !important;
+  z-index: 20;
+}
