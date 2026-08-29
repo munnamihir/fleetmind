@@ -1,0 +1,56 @@
+.fmV2WakeNotice {
+  position: fixed;
+  z-index: 150;
+  top: 80px;
+  right: 20px;
+  width: min(390px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid rgba(228, 184, 111, .28);
+  border-radius: 11px;
+  color: #e7c98d;
+  background: linear-gradient(145deg, rgba(26, 22, 15, .96), rgba(11, 13, 17, .97));
+  box-shadow: 0 20px 55px rgba(0, 0, 0, .4);
+  backdrop-filter: blur(18px);
+}
+
+.fmV2WakeNotice svg {
+  margin-top: 2px;
+}
+
+.fmV2WakeNotice b,
+.fmV2WakeNotice span {
+  display: block;
+}
+
+.fmV2WakeNotice b {
+  font-size: 8px;
+  letter-spacing: .12em;
+}
+
+.fmV2WakeNotice span {
+  margin-top: 4px;
+  color: #8c8373;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.fmV2WakeNotice .spinning,
+.fmV2Pulse .spinning {
+  animation: fmWakeSpin .9s linear infinite;
+}
+
+@keyframes fmWakeSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 650px) {
+  .fmV2WakeNotice {
+    top: 66px;
+    right: 10px;
+    width: calc(100vw - 20px);
+  }
+}
