@@ -6,6 +6,7 @@ import {
   Command,
   Gauge,
   Inbox,
+  LoaderCircle,
   Maximize2,
   Minimize2,
   Search,
@@ -138,6 +139,7 @@ export function FleetMindExperienceV2() {
   const [density, setDensity] = useState<Density>(readStoredDensity);
   const [focusMode, setFocusMode] = useState(false);
   const [apiHealthy, setApiHealthy] = useState<boolean | null>(null);
+  const [apiWaking, setApiWaking] = useState(false);
   const [apiLatency, setApiLatency] = useState<number | null>(null);
   const [now, setNow] = useState(() => new Date());
 
@@ -169,6 +171,12 @@ export function FleetMindExperienceV2() {
 
   const checkHealth = useCallback(async () => {
     const started = performance.now();
+    setApiWaking(false);
+
+    const wakeTimer = window.setTimeout(() => {
+      setApiWaking(true);
+    }, 2200);
+
     try {
       const response = await fetch(`${API}/health`, { cache: 'no-store' });
       setApiHealthy(response.ok);
@@ -176,6 +184,9 @@ export function FleetMindExperienceV2() {
     } catch {
       setApiHealthy(false);
       setApiLatency(null);
+    } finally {
+      window.clearTimeout(wakeTimer);
+      setApiWaking(false);
     }
   }, []);
 
@@ -273,10 +284,12 @@ export function FleetMindExperienceV2() {
           >
             {apiHealthy === false ? (
               <WifiOff size={14} aria-hidden="true" />
+            ) : apiWaking ? (
+              <LoaderCircle size={14} className="spinning" aria-hidden="true" />
             ) : (
               <Wifi size={14} aria-hidden="true" />
             )}
-            <span>{apiHealthy === false ? 'API OFFLINE' : apiHealthy == null ? 'CHECKING' : 'API LIVE'}</span>
+            <span>{apiWaking ? 'WAKING API' : apiHealthy === false ? 'API OFFLINE' : apiHealthy == null ? 'CHECKING' : 'API LIVE'}</span>
             {apiLatency != null && <small>{apiLatency}ms</small>}
           </button>
 
@@ -327,6 +340,16 @@ export function FleetMindExperienceV2() {
           </div>
         </div>
       </div>
+
+      {apiWaking && (
+        <div className="fmV2WakeNotice" role="status">
+          <LoaderCircle size={15} className="spinning" aria-hidden="true" />
+          <div>
+            <b>WAKING FREE SERVICE</b>
+            <span>FleetMind's API is starting after inactivity. Keep this page open; data will appear automatically when the service is ready.</span>
+          </div>
+        </div>
+      )}
 
       <nav className="fmV2MobileNav" aria-label="FleetMind mobile navigation">
         {MOBILE_DESTINATIONS.map(destination => (
