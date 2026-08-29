@@ -1,0 +1,459 @@
+.fmDemoBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid rgba(228, 184, 111, .28);
+  border-radius: 999px;
+  color: #e7c98d;
+  background: rgba(228, 184, 111, .07);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  white-space: nowrap;
+}
+
+.fmDemoBanner {
+  display: grid;
+  grid-template-columns: minmax(190px, auto) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin: 0 0 14px;
+  padding: 9px 11px;
+  border: 1px solid rgba(160, 178, 200, .13);
+  border-radius: 11px;
+  background: linear-gradient(90deg, rgba(228, 184, 111, .035), rgba(10, 14, 19, .76) 26%, rgba(10, 14, 19, .76));
+  box-shadow: inset 0 1px rgba(255, 255, 255, .018);
+}
+
+.fmDemoIdentity,
+.fmDemoProvenance,
+.fmDemoBannerActions,
+.fmDemoProvenance > span {
+  display: flex;
+  align-items: center;
+}
+
+.fmDemoIdentity {
+  min-width: 0;
+  gap: 9px;
+}
+
+.fmDemoIdentity > span:last-child {
+  overflow: hidden;
+  color: #687582;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fmDemoProvenance {
+  min-width: 0;
+  gap: 13px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fmDemoProvenance::-webkit-scrollbar {
+  display: none;
+}
+
+.fmDemoProvenance > span {
+  flex: 0 0 auto;
+  gap: 5px;
+  color: #83909d;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.fmDemoProvenance b {
+  color: #566370;
+  font-weight: 650;
+}
+
+.fmDemoLineage {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fmDemoBannerActions {
+  gap: 6px;
+}
+
+.fmDemoBannerActions button,
+.fmDemoLandingCtas button,
+.fmDemoStory button {
+  min-height: 31px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(160, 178, 200, .14);
+  border-radius: 8px;
+  color: #9aa6b3;
+  background: rgba(255, 255, 255, .02);
+  cursor: pointer;
+}
+
+.fmDemoBannerActions button:hover,
+.fmDemoLandingCtas button:hover,
+.fmDemoStory button:hover {
+  color: #eef4fa;
+  border-color: rgba(121, 183, 255, .25);
+  background: rgba(121, 183, 255, .06);
+}
+
+.fmDemoBannerActions button.primary,
+.fmDemoLandingCtas button.primary,
+.fmDemoStory button.primary {
+  color: #eaf4ff;
+  border-color: rgba(121, 183, 255, .30);
+  background: linear-gradient(180deg, rgba(121, 183, 255, .16), rgba(121, 183, 255, .07));
+}
+
+.fmDemoLanding {
+  position: fixed;
+  z-index: 240;
+  inset: 0;
+  overflow: auto;
+  color: #eef4fa;
+  background:
+    radial-gradient(circle at 72% 18%, rgba(74, 133, 205, .16), transparent 31%),
+    radial-gradient(circle at 23% 36%, rgba(75, 161, 141, .07), transparent 29%),
+    #06080b;
+}
+
+.fmDemoLandingGlow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: .18;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, .018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .014) 1px, transparent 1px);
+  background-size: 72px 72px;
+}
+
+.fmDemoLandingShell {
+  position: relative;
+  width: min(1180px, calc(100vw - 44px));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 28px 0 48px;
+}
+
+.fmDemoLandingTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(160, 178, 200, .11);
+}
+
+.fmDemoLandingBrand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.fmDemoLandingBrand > span {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(121, 183, 255, .26);
+  border-radius: 10px;
+  color: #a7d0ff;
+  background: rgba(121, 183, 255, .07);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.fmDemoLandingBrand b,
+.fmDemoLandingBrand small {
+  display: block;
+}
+
+.fmDemoLandingBrand b {
+  font-size: 11px;
+  letter-spacing: .15em;
+}
+
+.fmDemoLandingBrand small {
+  margin-top: 3px;
+  color: #566370;
+  font-size: 7px;
+  letter-spacing: .18em;
+}
+
+.fmDemoLandingHero {
+  min-height: 560px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(330px, .7fr);
+  gap: 70px;
+  align-items: center;
+}
+
+.fmDemoLandingHero > div > p,
+.fmDemoLandingProof > span,
+.fmDemoStoryHead > span {
+  color: #71808f;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .18em;
+}
+
+.fmDemoLandingHero h1 {
+  max-width: 760px;
+  margin: 12px 0 18px;
+  font-size: clamp(42px, 6vw, 76px);
+  line-height: .98;
+  letter-spacing: -.055em;
+}
+
+.fmDemoLandingHero > div > span {
+  display: block;
+  max-width: 690px;
+  color: #8f9ba8;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.fmDemoLandingCtas {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 27px;
+}
+
+.fmDemoLandingCtas button {
+  min-height: 42px;
+  padding: 0 15px;
+  font-weight: 700;
+}
+
+.fmDemoLandingProof {
+  padding: 20px;
+  border: 1px solid rgba(160, 178, 200, .14);
+  border-radius: 15px;
+  background: linear-gradient(145deg, rgba(16, 21, 28, .88), rgba(8, 12, 17, .88));
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .32);
+}
+
+.fmDemoLandingProof dl {
+  margin: 14px 0 0;
+}
+
+.fmDemoLandingProof dl > div {
+  display: grid;
+  grid-template-columns: 115px minmax(0, 1fr);
+  gap: 12px;
+  padding: 11px 0;
+  border-top: 1px solid rgba(255, 255, 255, .05);
+}
+
+.fmDemoLandingProof dt {
+  color: #61707e;
+  font-size: 9px;
+}
+
+.fmDemoLandingProof dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #c3cdd7;
+  font-size: 9px;
+  text-align: right;
+}
+
+.fmDemoLandingPrinciples {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.fmDemoLandingPrinciples article {
+  min-height: 130px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 9px 10px;
+  padding: 17px;
+  border-top: 1px solid rgba(160, 178, 200, .15);
+  color: #71808e;
+}
+
+.fmDemoLandingPrinciples article svg {
+  color: #8ebeea;
+}
+
+.fmDemoLandingPrinciples article b {
+  color: #dce4ec;
+  font-size: 11px;
+}
+
+.fmDemoLandingPrinciples article span {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.fmDemoStory {
+  position: fixed;
+  z-index: 180;
+  right: 22px;
+  bottom: 22px;
+  width: min(390px, calc(100vw - 32px));
+  padding: 17px;
+  border: 1px solid rgba(121, 183, 255, .25);
+  border-radius: 14px;
+  color: #eaf1f7;
+  background: linear-gradient(145deg, rgba(14, 19, 26, .97), rgba(7, 10, 14, .98));
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .48);
+  backdrop-filter: blur(18px);
+}
+
+.fmDemoStoryHead,
+.fmDemoStoryFooter,
+.fmDemoStoryFooter > div {
+  display: flex;
+  align-items: center;
+}
+
+.fmDemoStoryHead,
+.fmDemoStoryFooter {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fmDemoStoryHead button {
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+}
+
+.fmDemoStory h2 {
+  margin: 13px 0 9px;
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.fmDemoStory > p {
+  margin: 0;
+  color: #8d99a6;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.fmDemoStoryVehicle {
+  margin: 13px 0;
+  padding: 11px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  border: 1px solid rgba(160, 178, 200, .10);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .018);
+}
+
+.fmDemoStoryVehicle span,
+.fmDemoStoryVehicle small {
+  color: #64717e;
+  font-size: 8px;
+}
+
+.fmDemoStoryVehicle b {
+  color: #dce8f4;
+  font-size: 10px;
+  text-align: right;
+}
+
+.fmDemoStoryVehicle small {
+  grid-column: 1 / -1;
+}
+
+.fmDemoStoryFooter {
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, .06);
+}
+
+.fmDemoStoryFooter > span {
+  color: #586572;
+  font: 8px/1.3 "SFMono-Regular", Consolas, monospace;
+}
+
+.fmDemoStoryFooter > div {
+  gap: 6px;
+}
+
+.fmDemoStoryFooter button {
+  padding: 0 10px;
+  font-size: 9px;
+}
+
+.fmDemoStoryFooter button:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1100px) {
+  .fmDemoBanner {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .fmDemoProvenance {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .fmDemoLandingHero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 30px;
+    padding: 70px 0 40px;
+  }
+
+  .fmDemoLandingProof {
+    max-width: 620px;
+  }
+}
+
+@media (max-width: 700px) {
+  .fmDemoBanner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fmDemoBannerActions,
+  .fmDemoProvenance {
+    grid-column: 1;
+  }
+
+  .fmDemoIdentity > span:last-child,
+  .fmDemoLineage {
+    display: none;
+  }
+
+  .fmDemoLandingShell {
+    width: min(100% - 28px, 1180px);
+  }
+
+  .fmDemoLandingHero {
+    min-height: auto;
+    padding-top: 54px;
+  }
+
+  .fmDemoLandingHero h1 {
+    font-size: clamp(38px, 13vw, 58px);
+  }
+
+  .fmDemoLandingPrinciples {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fmDemoStory {
+    right: 10px;
+    bottom: 78px;
+    width: calc(100vw - 20px);
+  }
+}
