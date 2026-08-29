@@ -1,0 +1,51 @@
+name: FleetMind Free Demo Refresh
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleetmind-free-demo-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.FLEETMIND_DEMO_DATABASE_URL }}
+      FLEETMIND_DEMO_EXPERIMENT_ID: exp-free-demo-v1
+      FLEETMIND_DEMO_VEHICLES: "500"
+      FLEETMIND_DEMO_SAMPLES_PER_VEHICLE: "140"
+      FLEETMIND_DEMO_EVENTS_PER_SECOND: "120"
+      FLEETMIND_DEMO_TIME_ACCELERATION: "1200"
+      FLEETMIND_DEMO_SEED: "20260824"
+      DIAGNOSTIC_ARTIFACT_DIR: ${{ runner.temp }}/fleetmind-artifacts/diagnostics
+      ML_ARTIFACT_DIR: ${{ runner.temp }}/fleetmind-artifacts/ml
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            services/worker/requirements.txt
+            services/ml/requirements.txt
+
+      - name: Install refresh dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/worker/requirements.txt
+          pip install -r services/ml/requirements.txt
+
+      - name: Refresh Neon demo dataset and diagnostics
+        run: python services/free_demo_refresh.py
