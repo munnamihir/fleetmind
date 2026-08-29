@@ -2,9 +2,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { FleetMindBreadcrumbs } from './FleetMindBreadcrumbs';
+import { FleetMindDemoBannerPortal } from './FleetMindDemoBannerPortal';
 import { FleetMindExperience } from './FleetMindExperience';
 import { FleetMindExperienceV2 } from './FleetMindExperienceV2';
 import { FleetMindNavigationRail } from './FleetMindNavigationRail';
+import { FleetMindPublicDemoExperience } from './FleetMindPublicDemo';
 import { FleetMindSelectionInspector } from './FleetMindSelectionInspector';
 import { FleetMindWorkInbox } from './FleetMindWorkInbox';
 import './styles.css';
@@ -16,6 +18,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <FleetMindNavigationRail />
     <FleetMindExperience />
     <FleetMindExperienceV2 />
+    <FleetMindPublicDemoExperience />
+    <FleetMindDemoBannerPortal />
     <FleetMindBreadcrumbs />
     <FleetMindWorkInbox />
     <FleetMindSelectionInspector />
