@@ -24,8 +24,8 @@ jobs:
       FLEETMIND_DEMO_EVENTS_PER_SECOND: "120"
       FLEETMIND_DEMO_TIME_ACCELERATION: "1200"
       FLEETMIND_DEMO_SEED: "20260824"
-      DIAGNOSTIC_ARTIFACT_DIR: ${{ runner.temp }}/fleetmind-artifacts/diagnostics
-      ML_ARTIFACT_DIR: ${{ runner.temp }}/fleetmind-artifacts/ml
+      DIAGNOSTIC_ARTIFACT_DIR: /tmp/fleetmind-artifacts/diagnostics
+      ML_ARTIFACT_DIR: /tmp/fleetmind-artifacts/ml
       PYTHONUNBUFFERED: "1"
 
     steps:
