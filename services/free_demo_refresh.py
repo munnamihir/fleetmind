@@ -26,8 +26,16 @@ EXPERIMENT_ID = os.getenv("FLEETMIND_DEMO_EXPERIMENT_ID", "exp-free-demo-v1")
 VEHICLE_COUNT = max(60, int(os.getenv("FLEETMIND_DEMO_VEHICLES", "500")))
 SAMPLES_PER_VEHICLE = max(24, int(os.getenv("FLEETMIND_DEMO_SAMPLES_PER_VEHICLE", "140")))
 EVENTS_PER_SECOND = max(1, int(os.getenv("FLEETMIND_DEMO_EVENTS_PER_SECOND", "120")))
-TIME_ACCELERATION = max(1.0, float(os.getenv("FLEETMIND_DEMO_TIME_ACCELERATION", "1200")))
+TIME_ACCELERATION = max(1.0, float(os.getenv("FLEETMIND_DEMO_TIME_ACCELERATION", "4800")))
 SEED = int(os.getenv("FLEETMIND_DEMO_SEED", "20260824"))
+
+EXPECTED_FAILURE_COMPONENTS = (
+    "coolant_pump",
+    "battery_pack",
+    "inverter",
+    "traction_motor",
+    "coolant_temp_sensor",
+)
 
 
 def load_module(name: str, path: Path):
@@ -58,6 +66,9 @@ def generate_experiment() -> dict:
     rng = random.Random(SEED + 1)
     telemetry_rows = 0
     failure_events = 0
+    failure_events_by_component = {
+        component: 0 for component in EXPECTED_FAILURE_COMPONENTS
+    }
 
     for sample_index in range(SAMPLES_PER_VEHICLE):
         batch = []
@@ -81,11 +92,16 @@ def generate_experiment() -> dict:
         for failure in failures:
             WORKER.persist_failure(failure)
             failure_events += 1
+            component = str(failure.get("component") or "unknown")
+            failure_events_by_component[component] = (
+                failure_events_by_component.get(component, 0) + 1
+            )
 
         if sample_index == 0 or (sample_index + 1) % 20 == 0 or sample_index + 1 == SAMPLES_PER_VEHICLE:
             print(
                 f"demo generation sample={sample_index + 1}/{SAMPLES_PER_VEHICLE} "
-                f"telemetry={telemetry_rows} failures={failure_events}",
+                f"telemetry={telemetry_rows} failures={failure_events} "
+                f"by_component={json.dumps(failure_events_by_component, sort_keys=True)}",
                 flush=True,
             )
 
@@ -95,7 +111,32 @@ def generate_experiment() -> dict:
         "samplesPerVehicle": SAMPLES_PER_VEHICLE,
         "telemetryRows": telemetry_rows,
         "failureEvents": failure_events,
+        "failureEventsByComponent": failure_events_by_component,
+        "timeAcceleration": TIME_ACCELERATION,
         "seed": SEED,
+    }
+
+
+def validate_source_failure_coverage(generated: dict) -> dict:
+    counts = generated.get("failureEventsByComponent") or {}
+    missing = [
+        component
+        for component in EXPECTED_FAILURE_COMPONENTS
+        if int(counts.get(component, 0) or 0) < 1
+    ]
+    if missing:
+        raise RuntimeError(
+            "Demo simulator did not produce source failure evidence for every "
+            "diagnostic component. Missing="
+            + json.dumps(missing)
+            + " generated="
+            + json.dumps(counts, sort_keys=True)
+            + ". Increase simulated lifetime rather than weakening diagnostic gates."
+        )
+    return {
+        "status": "covered",
+        "requiredComponents": list(EXPECTED_FAILURE_COMPONENTS),
+        "failureEventsByComponent": counts,
     }
 
 
@@ -174,6 +215,7 @@ def main() -> None:
     ensure_schema_compatibility()
     reset = reset_demo_source_data()
     generated = generate_experiment()
+    source_failure_coverage = validate_source_failure_coverage(generated)
     diagnostics = materialize_diagnostics()
     verification = verify(int(diagnostics["runId"]))
 
@@ -184,6 +226,7 @@ def main() -> None:
                 "mode": "scheduled_free_demo",
                 "reset": reset,
                 "generated": generated,
+                "sourceFailureCoverage": source_failure_coverage,
                 "diagnostics": diagnostics,
                 "verification": verification,
                 "interpretationPolicy": (
