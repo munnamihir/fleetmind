@@ -33,6 +33,16 @@ class FreeDemoRefreshContractTests(unittest.TestCase):
         self.assertIn("delete(Telemetry)", SCRIPT)
         self.assertIn("delete(FailureEvent)", SCRIPT)
 
+    def test_refresh_extends_simulated_lifetime_without_weakening_gates(self):
+        self.assertIn('FLEETMIND_DEMO_TIME_ACCELERATION: "4800"', WORKFLOW)
+        self.assertIn('FLEETMIND_DEMO_TIME_ACCELERATION", "4800"', SCRIPT)
+        self.assertIn("EXPECTED_FAILURE_COMPONENTS", SCRIPT)
+        self.assertIn("validate_source_failure_coverage", SCRIPT)
+        self.assertIn(
+            "Increase simulated lifetime rather than weakening diagnostic gates",
+            SCRIPT,
+        )
+
     def test_workflow_uses_only_github_runner_and_neon_secret(self):
         self.assertIn("runs-on: ubuntu-latest", WORKFLOW)
         self.assertIn("secrets.FLEETMIND_DEMO_DATABASE_URL", WORKFLOW)
