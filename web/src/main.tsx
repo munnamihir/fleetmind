@@ -9,6 +9,7 @@ import { FleetMindSelectionInspector } from './FleetMindSelectionInspector';
 import { FleetMindWorkInbox } from './FleetMindWorkInbox';
 import './styles.css';
 import './FleetMindExperienceV2Responsive.css';
+import './DashboardPageTabsFlowFix.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
