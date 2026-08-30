@@ -475,3 +475,24 @@ Phase 9.0  Fleet Reliability Intelligence Platform
 Phase 8.2 will add first-class post-execution observation: baseline vs post-workflow evidence, deterministic outcome classification, idempotent outcome materialization, and an Outcomes view in Fleet Command. It will describe **observed improvement/stability/worsening**, not claim that a workflow physically repaired a vehicle.
 
 See [ROADMAP.md](ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+
+## Standards & Community
+
+VOXA is being developed as an open research prototype exploring
+portable and explainable contextual trust.
+
+The project has been introduced to the W3C Credentials Community
+Group for technical discussion around:
+
+- verifiable evidence
+- derived trust
+- provenance
+- contextual trust states
+- Verifiable Credentials interoperability
+
+### Public discussion
+
+- [VOXA introduction to the W3C Credentials Community Group](W3C_URL)
+- [PTI / TumiTrust response](ALISON_URL)
+
